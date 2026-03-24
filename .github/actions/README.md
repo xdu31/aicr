@@ -6,6 +6,24 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 
 ### Core CI/CD Actions
 
+#### `security-scan/`
+**Purpose**: Anchore/Grype vulnerability scanning with SARIF upload
+**When to use**: Security validation in CI/CD pipelines
+**Inputs**:
+- `path` (optional): Filesystem path to scan (default: ".")
+- `image` (optional): Container image to scan
+- `severity-cutoff` (optional): Minimum severity (default: "high")
+- `output_file` (optional): SARIF file name (default: "scan-results.sarif")
+- `category` (optional): GitHub Security category (default: "anchore")
+
+**Example**:
+```yaml
+- uses: ./.github/actions/security-scan
+  with:
+    severity-cutoff: 'medium'
+    category: 'anchore-fs'
+```
+
 ### Development Environment Actions
 
 #### `install-e2e-tools/`

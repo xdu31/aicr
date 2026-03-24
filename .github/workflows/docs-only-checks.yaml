@@ -54,3 +54,10 @@ jobs:
     timeout-minutes: 1
     steps:
       - run: echo "Documentation-only change — E2E not required"
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — security scan not required"
