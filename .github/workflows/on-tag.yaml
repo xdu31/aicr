@@ -391,7 +391,6 @@ jobs:
           BUILD_KO: ${{ needs.build-ko.result }}
           BUILD_DOCKER: ${{ needs.build-docker.result }}
           MANIFEST: ${{ needs.docker-manifest.result }}
-          VULN_SCAN: ${{ needs.image-vuln-scan.result }}
           ATTEST: ${{ needs.attest.result }}
           RELEASE_CHECK: ${{ needs.release-check.result }}
           DEPLOY: ${{ needs.deploy.result }}
@@ -413,7 +412,6 @@ jobs:
             echo "| Build (Ko) | ${BUILD_KO} |"
             echo "| Build (Docker) | ${BUILD_DOCKER} |"
             echo "| Docker Manifest | ${MANIFEST} |"
-            echo "| Vulnerability Scan | ${VULN_SCAN} |"
             echo "| Attestation | ${ATTEST} |"
             echo "| Release Check | ${RELEASE_CHECK} |"
             echo "| Deploy | ${DEPLOY} |"
