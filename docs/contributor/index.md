@@ -1082,9 +1082,8 @@ flowchart TD
 - **go-ci** composite action: Go setup (1.25), tests with race detector, golangci-lint (v2.6.2), GitHub-native coverage
 - **integration** composite action: CLI integration tests via tools/e2e
 - **e2e** composite action: Full E2E tests with Kind cluster and fake GPU environment
-- **security-scan** composite action: Trivy vulnerability scanning (MEDIUM+), SARIF upload to Security tab
 
-**Permissions**: `contents: read`, `id-token: write`, `security-events: write`
+**Permissions**: `contents: read`, `id-token: write`
 
 ### Release Automation (on-tag.yaml)
 
@@ -1151,7 +1150,6 @@ flowchart TD
 1. **Primitives** (Single-purpose building blocks):
    - `ghcr-login`: GHCR authentication
    - `setup-build-tools`: Modular tool installation
-   - `security-scan`: Trivy vulnerability scanning
 
 2. **Composed Actions** (Combine primitives):
    - `go-ci`: Complete Go CI pipeline (setup → test → lint)

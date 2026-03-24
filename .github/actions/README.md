@@ -6,25 +6,6 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 
 ### Core CI/CD Actions
 
-#### `security-scan/`
-**Purpose**: Trivy vulnerability scanning with SARIF upload  
-**When to use**: Security validation in CI/CD pipelines  
-**Inputs**:
-- `scan_type` (optional): Scan type (default: "fs")
-- `scan_ref` (optional): Scan target (default: ".")
-- `severity` (optional): Severity levels (default: "HIGH,CRITICAL")
-- `output_file` (optional): SARIF file name (default: "trivy-results.sarif")
-- `category` (optional): GitHub Security category (default: "trivy")
-- `skip_dirs` (optional): Directories to skip (default: "")
-
-**Example**:
-```yaml
-- uses: ./.github/actions/security-scan
-  with:
-    severity: 'MEDIUM,HIGH,CRITICAL'
-    category: 'trivy-fs'
-```
-
 ### Development Environment Actions
 
 #### `install-e2e-tools/`
@@ -271,9 +252,6 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ### Removed Redundancies
 - **Before**: 3 separate GHCR logins (attest-image-from-tag, sbom-and-attest, workflow)
 - **After**: Single `ghcr-login` action reused everywhere
-
-- **Before**: Inline Trivy scan + upload steps in workflow
-- **After**: Reusable `security-scan` action
 
 - **Before**: 4 separate tool installations in workflow (ko, syft, crane, goreleaser)
 - **After**: Single `go-build-release` or selective `setup-build-tools`
