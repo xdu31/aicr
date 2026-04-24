@@ -152,6 +152,7 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	variantDefault: {
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100},
 		recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
+		recipe.CriteriaServiceAKS: {recipe.CriteriaAcceleratorH100},
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
 	variantNET: {
@@ -297,7 +298,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant); applyErr != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL resources", applyErr)
 	}
-	defer cleanupNCCLResources(dynamicClient, gpuConfig.Namespace)
+	defer cleanupNCCLResources(dynamicClient, ctx.Clientset, gpuConfig.Namespace)
 
 	podHelper := &helper.PodLifecycle{
 		ClientSet: ctx.Clientset,
@@ -573,6 +574,27 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		templateData["GKE_NETWORK_INTERFACES"] = buildGKENetworkInterfacesAnnotation(gpuNICs)
 		templateData["NRI_DEVICE_ANNOTATION"] = buildNRIDeviceAnnotation(config.GPUCountPerNode)
 		slog.Info("Discovered GKE GPU NIC networks", "count", len(gpuNICs), "networks", gpuNICs)
+	}
+
+	// For AKS, discover Mellanox NIC count and create NCCL topology ConfigMap.
+	// mlnxnics count of 0 is valid — Network Operator may not be deployed, but
+	// NCCL still uses IB via OFED kernel drivers.
+	if service == recipe.CriteriaServiceAKS {
+		mlnxCount := discoverAKSNodeConfig(config.Nodes[0])
+		// Indentation matches the resource block position in runtime.yaml.
+		const mlnxIndent = "                      "
+		templateData["MLNX_RESOURCE_LIMITS"] = buildMLNXResourceLine(mlnxCount, mlnxIndent)
+		templateData["MLNX_RESOURCE_REQUESTS"] = buildMLNXResourceLine(mlnxCount, mlnxIndent)
+		templateData["TOPO_CONFIGMAP_NAME"] = ncclTopoConfigMapName
+		if mlnxCount > 0 {
+			slog.Info("Discovered AKS Mellanox NIC configuration", "mlnxnics", mlnxCount)
+		} else {
+			slog.Warn("No nvidia.com/mlnxnics found — Network Operator may not be deployed",
+				"note", "NCCL will still use IB via OFED kernel drivers")
+		}
+		if err := createTopoConfigMap(ctx.Ctx, ctx.Clientset, config.Namespace); err != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create NCCL topology ConfigMap", err)
+		}
 	}
 
 	// For EKS, discover instance type and EFA adapter count from GPU nodes.
@@ -1134,12 +1156,10 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 	}
 }
 
-// cleanupNCCLResources removes the trainjob, runtime, and (if present) the
-// ComputeDomain CR using the dynamic client. Deleting the ComputeDomain
-// cascades to its auto-generated ResourceClaimTemplate via the DRA driver;
-// NotFound on the ComputeDomain is expected for the default/NET variants
-// and is logged at debug rather than error.
-func cleanupNCCLResources(dynamicClient dynamic.Interface, namespace string) {
+// cleanupNCCLResources removes the trainjob, runtime, topo ConfigMap, and
+// (if present) the ComputeDomain CR. NotFound on the ComputeDomain and topo
+// ConfigMap is expected for non-NVLS and non-AKS platforms respectively.
+func cleanupNCCLResources(dynamicClient dynamic.Interface, clientset kubernetes.Interface, namespace string) {
 	slog.Info("Cleaning up NCCL test resources...")
 
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
@@ -1173,4 +1193,8 @@ func cleanupNCCLResources(dynamicClient dynamic.Interface, namespace string) {
 	default:
 		slog.Error("Warning: Failed to delete ComputeDomain", "error", err, "name", ncclComputeDomainName)
 	}
+
+	// Delete NCCL topology ConfigMap if this was AKS. NotFound is expected
+	// for non-AKS platforms.
+	deleteTopoConfigMap(clientset, namespace)
 }

@@ -413,6 +413,12 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("GKE tolerations count = %d, want 2", len(tols))
 		}
 	})
+	t.Run("AKS returns nil (IB auto-detected)", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceAKS, "")
+		if ns != nil || tols != nil {
+			t.Errorf("AKS service should return nil, got ns=%v tols=%v", ns, tols)
+		}
+	})
 	t.Run("unknown service returns nil", func(t *testing.T) {
 		ns, tols := platformWorkerScheduling("unknown", "")
 		if ns != nil || tols != nil {
@@ -475,6 +481,14 @@ func TestTemplatePath(t *testing.T) {
 			variant:     variantDefault,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "any", "runtime.yaml"),
+		},
+		{
+			name:        "aks h100 runtime default",
+			accelerator: recipe.CriteriaAcceleratorH100,
+			service:     recipe.CriteriaServiceAKS,
+			variant:     variantDefault,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "h100", "aks", "runtime.yaml"),
 		},
 		{
 			name:        "gb200 eks NET variant",
@@ -665,6 +679,9 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 	// so existing recipes that reference "nccl-all-reduce-bw" keep working.
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceEKS]; len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorH100 {
 		t.Errorf("variantDefault EKS = %v, want [H100]", accels)
+	}
+	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAKS]; len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorH100 {
+		t.Errorf("variantDefault AKS = %v, want [H100]", accels)
 	}
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAny]; len(accels) != 2 {
 		t.Errorf("variantDefault Any count = %d, want 2 (B200, GB200)", len(accels))
