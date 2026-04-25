@@ -1168,7 +1168,7 @@ func cleanupNCCLResources(dynamicClient dynamic.Interface, clientset kubernetes.
 	// Delete trainjob
 	err := dynamicClient.Resource(trainJobGVR).Namespace(namespace).Delete(cleanupCtx, ncclTrainJobName, metav1.DeleteOptions{})
 	if err != nil {
-		slog.Error("Warning: Failed to delete TrainJob", "error", err)
+		slog.Warn("failed to delete TrainJob", "error", err)
 	} else {
 		slog.Info("Deleted TrainJob")
 	}
@@ -1176,7 +1176,7 @@ func cleanupNCCLResources(dynamicClient dynamic.Interface, clientset kubernetes.
 	// Delete runtime
 	err = dynamicClient.Resource(trainingRuntimeGVR).Namespace(namespace).Delete(cleanupCtx, ncclTrainingRuntimeName, metav1.DeleteOptions{})
 	if err != nil {
-		slog.Error("Warning: Failed to delete TrainingRuntime", "error", err)
+		slog.Warn("failed to delete TrainingRuntime", "error", err)
 	} else {
 		slog.Info("Deleted TrainingRuntime")
 	}
@@ -1191,7 +1191,7 @@ func cleanupNCCLResources(dynamicClient dynamic.Interface, clientset kubernetes.
 	case apierrors.IsNotFound(err):
 		slog.Debug("ComputeDomain not present (non-NVLS variant), skipping", "name", ncclComputeDomainName)
 	default:
-		slog.Error("Warning: Failed to delete ComputeDomain", "error", err, "name", ncclComputeDomainName)
+		slog.Warn("failed to delete ComputeDomain", "error", err, "name", ncclComputeDomainName)
 	}
 
 	// Delete NCCL topology ConfigMap if this was AKS. NotFound is expected
