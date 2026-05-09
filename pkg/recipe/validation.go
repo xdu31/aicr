@@ -63,7 +63,20 @@ type NodeSelection struct {
 // Validation is the complete validation specification.
 // It combines ValidationConfig (what to run) with validation context (what to validate).
 // This is the primary type used by validators and controllers.
+//
+// The APIVersion, Kind, and Metadata fields are optional (omitempty) to support both:
+//   - Standalone resource usage: populated when loaded from validation.yaml files
+//   - Embedded usage: omitted when embedded in controller CRs to avoid redundancy
 type Validation struct {
+	// APIVersion is the API version (optional, for standalone resource usage).
+	APIVersion string `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
+
+	// Kind is always "Validation" (optional, for standalone resource usage).
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
+
+	// Metadata contains validation metadata (optional, for standalone resource usage).
+	Metadata *ValidationMetadata `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+
 	ValidationConfig `json:",inline" yaml:",inline"`
 
 	// ComponentRefs lists the components to validate.
@@ -74,6 +87,15 @@ type Validation struct {
 
 	// Constraints are top-level readiness constraints evaluated before validation phases.
 	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+}
+
+// ValidationMetadata contains validation-level metadata.
+type ValidationMetadata struct {
+	// Name is a human-readable name for this validation.
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+
+	// Version is the version of this validation specification.
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 }
 
 // NewValidation creates a new empty Validation instance.
@@ -90,12 +112,24 @@ func NewValidation() *Validation {
 // This extracts the validation-relevant fields (ValidationConfig, ComponentRefs, Criteria)
 // and discards recipe-specific metadata (AppliedOverlays, DeploymentOrder, etc.).
 // Returns nil if the input RecipeResult is nil.
+//
+// Populates optional APIVersion/Kind/Metadata fields to support standalone usage.
+// When embedding in CRs, these fields can be omitted via omitempty tags.
 func ToValidation(r *RecipeResult) *Validation {
 	if r == nil {
 		return nil
 	}
 
 	validation := NewValidation()
+
+	// Populate optional resource fields for standalone usage
+	validation.APIVersion = r.APIVersion
+	validation.Kind = "Validation" // Change from "RecipeResult" to "Validation"
+	if r.Metadata.Version != "" {
+		validation.Metadata = &ValidationMetadata{
+			Version: r.Metadata.Version,
+		}
+	}
 
 	// Copy ValidationConfig if present
 	if r.Validation != nil {
