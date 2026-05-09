@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -35,6 +36,9 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	}
 	if catalog.Kind != expectedKind {
 		t.Errorf("Kind = %q, want %q", catalog.Kind, expectedKind)
+	}
+	if catalog.Metadata == nil {
+		t.Fatal("Metadata is nil")
 	}
 	if catalog.Metadata.Version != "1.0.0" {
 		t.Errorf("Metadata.Version = %q, want %q", catalog.Metadata.Version, "1.0.0")
@@ -845,5 +849,83 @@ func TestImagePullPolicy(t *testing.T) {
 				t.Errorf("ImagePullPolicy(%q) = %q, want %q", tt.image, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCatalogOmitEmpty(t *testing.T) {
+	// Catalog without optional fields - should serialize cleanly
+	catalog := &ValidatorCatalog{
+		Validators: []ValidatorEntry{
+			{
+				Name:        "test-validator",
+				Phase:       "deployment",
+				Description: "Test validator",
+				Image:       "test:latest",
+				Timeout:     2 * time.Minute,
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() failed: %v", err)
+	}
+
+	yamlStr := string(data)
+	// Verify optional fields are omitted
+	if strings.Contains(yamlStr, "apiVersion:") {
+		t.Error("YAML should not contain apiVersion when empty")
+	}
+	if strings.Contains(yamlStr, "kind:") {
+		t.Error("YAML should not contain kind when empty")
+	}
+	if strings.Contains(yamlStr, "metadata:") {
+		t.Error("YAML should not contain metadata when nil")
+	}
+
+	// But required field should be present
+	if !strings.Contains(yamlStr, "validators:") {
+		t.Error("YAML should contain validators")
+	}
+}
+
+func TestCatalogEmbedding(t *testing.T) {
+	// Simulate embedding in a CR spec
+	type ValidatorCatalogSpec struct {
+		Catalog ValidatorCatalog `yaml:"catalog"`
+		Enabled bool             `yaml:"enabled"`
+	}
+
+	spec := ValidatorCatalogSpec{
+		Catalog: ValidatorCatalog{
+			// No APIVersion/Kind/Metadata - clean embedding
+			Validators: []ValidatorEntry{
+				{
+					Name:        "gpu-operator-health",
+					Phase:       "deployment",
+					Description: "Check GPU operator",
+					Image:       "test:latest",
+					Timeout:     2 * time.Minute,
+				},
+			},
+		},
+		Enabled: true,
+	}
+
+	data, err := yaml.Marshal(spec)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() failed: %v", err)
+	}
+
+	yamlStr := string(data)
+	// Verify clean embedding without resource metadata
+	if strings.Contains(yamlStr, "apiVersion:") {
+		t.Error("Embedded catalog should not contain apiVersion")
+	}
+	if strings.Contains(yamlStr, "kind:") {
+		t.Error("Embedded catalog should not contain kind")
+	}
+	if strings.Contains(yamlStr, "metadata:") {
+		t.Error("Embedded catalog should not contain metadata")
 	}
 }

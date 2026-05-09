@@ -39,10 +39,31 @@ const (
 )
 
 // ValidatorCatalog is the top-level catalog document.
+// Supports both standalone file usage (with full metadata) and embedded usage in CRs (metadata omitted).
+//
+// Standalone usage (catalog.yaml):
+//   apiVersion: aicr.nvidia.com/v1
+//   kind: ValidatorCatalog
+//   metadata:
+//     name: default
+//     version: 1.0.0
+//   validators: [...]
+//
+// Embedded usage (in a CR):
+//   spec:
+//     catalog:
+//       validators: [...]
 type ValidatorCatalog struct {
-	APIVersion string           `yaml:"apiVersion"`
-	Kind       string           `yaml:"kind"`
-	Metadata   CatalogMetadata  `yaml:"metadata"`
+	// APIVersion is the API version (optional, for standalone resource usage).
+	APIVersion string `yaml:"apiVersion,omitempty"`
+
+	// Kind is always "ValidatorCatalog" (optional, for standalone resource usage).
+	Kind string `yaml:"kind,omitempty"`
+
+	// Metadata contains catalog metadata (optional, for standalone resource usage).
+	Metadata *CatalogMetadata `yaml:"metadata,omitempty"`
+
+	// Validators is the list of validator entries (required).
 	Validators []ValidatorEntry `yaml:"validators"`
 }
 
