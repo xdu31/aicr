@@ -80,7 +80,8 @@ func TestRecipeHasComponent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := &validators.Context{Recipe: tt.recipe}
+			validation := recipe.ToValidation(tt.recipe)
+			ctx := &validators.Context{Validation: validation}
 			got := recipeHasComponent(ctx, tt.component)
 			if got != tt.want {
 				t.Errorf("recipeHasComponent(%q) = %v, want %v", tt.component, got, tt.want)
@@ -158,10 +159,11 @@ func TestCheckRobustControllerRouting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			validation := recipe.ToValidation(tt.recipe)
 			ctx := &validators.Context{
-				Ctx:       context.Background(),
-				Clientset: k8sfake.NewClientset(),
-				Recipe:    tt.recipe,
+				Ctx:        context.Background(),
+				Clientset:  k8sfake.NewClientset(),
+				Validation: validation,
 			}
 
 			err := CheckRobustController(ctx)

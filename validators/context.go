@@ -54,8 +54,8 @@ type Context struct {
 	// Snapshot is the captured cluster state.
 	Snapshot *snapshotter.Snapshot
 
-	// Recipe is the recipe with validation configuration.
-	Recipe *recipe.RecipeResult
+	// Validation is the validation specification (config + context).
+	Validation *recipe.Validation
 
 	// Namespace is the validation namespace.
 	Namespace string
@@ -124,16 +124,14 @@ func LoadContext() (*Context, error) {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load snapshot", err)
 	}
 
-	// Load recipe
+	// Load recipe and convert to validation
 	recipePath := envOrDefault("AICR_RECIPE_PATH", "/data/recipe/recipe.yaml")
-	var rec *recipe.RecipeResult
-	if _, statErr := os.Stat(recipePath); statErr == nil {
-		rec, err = serializer.FromFile[recipe.RecipeResult](recipePath)
-		if err != nil {
-			cancel()
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load recipe", err)
-		}
+	rec, err := serializer.FromFile[recipe.RecipeResult](recipePath)
+	if err != nil {
+		cancel()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load recipe", err)
 	}
+	validation := recipe.ToValidation(rec)
 
 	// Parse optional scheduling overrides for inner workloads.
 	nodeSelector, err := parseNodeSelectorEnv()
@@ -154,7 +152,7 @@ func LoadContext() (*Context, error) {
 		RESTConfig:    config,
 		DynamicClient: dynClient,
 		Snapshot:      snap,
-		Recipe:        rec,
+		Validation:    validation,
 		Namespace:     namespace,
 		NodeSelector:  nodeSelector,
 		Tolerations:   tolerations,

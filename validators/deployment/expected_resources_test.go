@@ -840,13 +840,15 @@ func newDeploymentTestContextWithDiscovery(
 	configureFakeDiscovery(t, clientset, dynamicObjects, extraRegistered, unregistered)
 	dynClient := newFakeDynamicClient(dynamicObjects, unregistered...)
 
+	rec := &recipe.RecipeResult{
+		ComponentRefs: refs,
+	}
+
 	return &validators.Context{
 		Ctx:           context.Background(),
 		Clientset:     clientset,
 		DynamicClient: dynClient,
-		Recipe: &recipe.RecipeResult{
-			ComponentRefs: refs,
-		},
+		Validation:    recipe.ToValidation(rec),
 	}
 }
 

@@ -39,35 +39,35 @@ func TestHasDynamoPlatform(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "nil recipe",
-			ctx:  &validators.Context{Recipe: nil},
+			name: "nil validation",
+			ctx:  &validators.Context{Validation: nil},
 			want: false,
 		},
 		{
 			name: "empty componentRefs",
-			ctx: &validators.Context{Recipe: &recipe.RecipeResult{
+			ctx: &validators.Context{Validation: recipe.ToValidation(&recipe.RecipeResult{
 				ComponentRefs: nil,
-			}},
+			})},
 			want: false,
 		},
 		{
 			name: "componentRefs without dynamo-platform",
-			ctx: &validators.Context{Recipe: &recipe.RecipeResult{
+			ctx: &validators.Context{Validation: recipe.ToValidation(&recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
 					{Name: "gpu-operator"},
 					{Name: "kubeflow-trainer"},
 				},
-			}},
+			})},
 			want: false,
 		},
 		{
 			name: "dynamo-platform present",
-			ctx: &validators.Context{Recipe: &recipe.RecipeResult{
+			ctx: &validators.Context{Validation: recipe.ToValidation(&recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
 					{Name: "gpu-operator"},
 					{Name: "dynamo-platform"},
 				},
-			}},
+			})},
 			want: true,
 		},
 	}
