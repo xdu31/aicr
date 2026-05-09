@@ -26,12 +26,12 @@ func TestToValidation(t *testing.T) {
 		APIVersion: "aicr.nvidia.com/v1",
 		Kind:       "RecipeResult",
 		Metadata: struct {
-			Version            string                `json:"version,omitempty" yaml:"version,omitempty"`
-			AppliedOverlays    []string              `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []ExcludedOverlay     `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
-			ConstraintWarnings []ConstraintWarning   `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
+			Version            string              `json:"version,omitempty" yaml:"version,omitempty"`
+			AppliedOverlays    []string            `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
+			ExcludedOverlays   []ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+			ConstraintWarnings []ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
 		}{
-			Version: "1.0.0",
+			Version:         "1.0.0",
 			AppliedOverlays: []string{"base", "eks"},
 		},
 		Criteria: &Criteria{
