@@ -42,17 +42,19 @@ const (
 // Supports both standalone file usage (with full metadata) and embedded usage in CRs (metadata omitted).
 //
 // Standalone usage (catalog.yaml):
-//   apiVersion: aicr.nvidia.com/v1
-//   kind: ValidatorCatalog
-//   metadata:
-//     name: default
-//     version: 1.0.0
-//   validators: [...]
+//
+//	apiVersion: aicr.nvidia.com/v1
+//	kind: ValidatorCatalog
+//	metadata:
+//	  name: default
+//	  version: 1.0.0
+//	validators: [...]
 //
 // Embedded usage (in a CR):
-//   spec:
-//     catalog:
-//       validators: [...]
+//
+//	spec:
+//	  catalog:
+//	    validators: [...]
 type ValidatorCatalog struct {
 	// APIVersion is the API version (optional, for standalone resource usage).
 	APIVersion string `yaml:"apiVersion,omitempty"`
