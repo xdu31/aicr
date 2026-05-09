@@ -61,12 +61,22 @@ type NodeSelection struct {
 }
 
 // Validation is the complete validation specification.
-// It combines ValidationConfig (what to run) with validation context (what to validate).
-// This is the primary type used by validators and controllers.
+// Supports both standalone file usage (with full metadata) and embedded usage in CRs (metadata omitted).
 //
-// The APIVersion, Kind, and Metadata fields are optional (omitempty) to support both:
-//   - Standalone resource usage: populated when loaded from validation.yaml files
-//   - Embedded usage: omitted when embedded in controller CRs to avoid redundancy
+// Standalone usage (validation.yaml):
+//   apiVersion: aicr.nvidia.com/v1
+//   kind: Validation
+//   metadata:
+//     name: my-validation
+//     version: 1.0.0
+//   componentRefs: [...]
+//   criteria: {...}
+//
+// Embedded usage (in a CR):
+//   spec:
+//     validation:
+//       componentRefs: [...]
+//       criteria: {...}
 type Validation struct {
 	// APIVersion is the API version (optional, for standalone resource usage).
 	APIVersion string `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
@@ -79,13 +89,13 @@ type Validation struct {
 
 	ValidationConfig `json:",inline" yaml:",inline"`
 
-	// ComponentRefs lists the components to validate.
-	ComponentRefs []ComponentRef `json:"componentRefs"`
+	// ComponentRefs lists the components to validate (optional).
+	ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
 
-	// Criteria specifies the cluster characteristics.
-	Criteria Criteria `json:"criteria"`
+	// Criteria specifies the cluster characteristics (optional).
+	Criteria Criteria `json:"criteria,omitempty" yaml:"criteria,omitempty"`
 
-	// Constraints are top-level readiness constraints evaluated before validation phases.
+	// Constraints are top-level readiness constraints evaluated before validation phases (optional).
 	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
 }
 
