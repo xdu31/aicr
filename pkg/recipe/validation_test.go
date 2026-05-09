@@ -61,8 +61,8 @@ func TestToValidation(t *testing.T) {
 	if validation.APIVersion != "aicr.nvidia.com/v1" {
 		t.Errorf("APIVersion = %q, want %q", validation.APIVersion, "aicr.nvidia.com/v1")
 	}
-	if validation.Kind != "Validation" {
-		t.Errorf("Kind = %q, want %q", validation.Kind, "Validation")
+	if validation.Kind != KindValidation {
+		t.Errorf("Kind = %q, want %q", validation.Kind, KindValidation)
 	}
 	if validation.Metadata == nil {
 		t.Fatal("Metadata is nil")
@@ -99,7 +99,7 @@ func TestToValidationNil(t *testing.T) {
 func TestValidationJSONMarshal(t *testing.T) {
 	validation := &Validation{
 		APIVersion: "aicr.nvidia.com/v1",
-		Kind:       "Validation",
+		Kind:       KindValidation,
 		Metadata: &ValidationMetadata{
 			Name:    "test-validation",
 			Version: "1.0.0",
@@ -174,8 +174,8 @@ func TestValidationJSONUnmarshal(t *testing.T) {
 	if validation.APIVersion != "aicr.nvidia.com/v1" {
 		t.Errorf("APIVersion = %q, want %q", validation.APIVersion, "aicr.nvidia.com/v1")
 	}
-	if validation.Kind != "Validation" {
-		t.Errorf("Kind = %q, want %q", validation.Kind, "Validation")
+	if validation.Kind != KindValidation {
+		t.Errorf("Kind = %q, want %q", validation.Kind, KindValidation)
 	}
 	if validation.Metadata == nil {
 		t.Fatal("Metadata is nil")
@@ -188,7 +188,7 @@ func TestValidationJSONUnmarshal(t *testing.T) {
 func TestValidationYAMLMarshal(t *testing.T) {
 	validation := &Validation{
 		APIVersion: "aicr.nvidia.com/v1",
-		Kind:       "Validation",
+		Kind:       KindValidation,
 		Metadata: &ValidationMetadata{
 			Name:    "test-validation",
 			Version: "1.0.0",

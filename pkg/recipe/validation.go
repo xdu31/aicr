@@ -14,6 +14,11 @@
 
 package recipe
 
+const (
+	// KindValidation is the Kubernetes kind for Validation resources.
+	KindValidation = "Validation"
+)
+
 // ValidationConfig defines validation phases and settings.
 type ValidationConfig struct {
 	// Readiness defines readiness validation phase settings.
@@ -64,19 +69,21 @@ type NodeSelection struct {
 // Supports both standalone file usage (with full metadata) and embedded usage in CRs (metadata omitted).
 //
 // Standalone usage (validation.yaml):
-//   apiVersion: aicr.nvidia.com/v1
-//   kind: Validation
-//   metadata:
-//     name: my-validation
-//     version: 1.0.0
-//   componentRefs: [...]
-//   criteria: {...}
+//
+//	apiVersion: aicr.nvidia.com/v1
+//	kind: Validation
+//	metadata:
+//	  name: my-validation
+//	  version: 1.0.0
+//	componentRefs: [...]
+//	criteria: {...}
 //
 // Embedded usage (in a CR):
-//   spec:
-//     validation:
-//       componentRefs: [...]
-//       criteria: {...}
+//
+//	spec:
+//	  validation:
+//	    componentRefs: [...]
+//	    criteria: {...}
 type Validation struct {
 	// APIVersion is the API version (optional, for standalone resource usage).
 	APIVersion string `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
@@ -134,7 +141,7 @@ func ToValidation(r *RecipeResult) *Validation {
 
 	// Populate optional resource fields for standalone usage
 	validation.APIVersion = r.APIVersion
-	validation.Kind = "Validation" // Change from "RecipeResult" to "Validation"
+	validation.Kind = KindValidation // Change from "RecipeResult" to "Validation"
 	if r.Metadata.Version != "" {
 		validation.Metadata = &ValidationMetadata{
 			Version: r.Metadata.Version,
