@@ -124,14 +124,13 @@ func LoadContext() (*Context, error) {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load snapshot", err)
 	}
 
-	// Load recipe and convert to validation
-	recipePath := envOrDefault("AICR_RECIPE_PATH", "/data/recipe/recipe.yaml")
-	rec, err := serializer.FromFile[recipe.RecipeResult](recipePath)
+	// Load validation
+	validationPath := envOrDefault("AICR_VALIDATION_PATH", "/data/validation/validation.yaml")
+	validation, err := serializer.FromFile[recipe.Validation](validationPath)
 	if err != nil {
 		cancel()
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load recipe", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validation", err)
 	}
-	validation := recipe.ToValidation(rec)
 
 	// Parse optional scheduling overrides for inner workloads.
 	nodeSelector, err := parseNodeSelectorEnv()
