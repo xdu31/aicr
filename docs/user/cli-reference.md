@@ -573,8 +573,9 @@ aicr validate [flags]
 **Flags:**
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--recipe` | `-r` | string | (required) | Path/URI to recipe file containing constraints |
+| `--recipe` | `-r` | string | (required) | Path/URI to recipe file containing constraints (or via `spec.validate.input.recipe` in `--config`) |
 | `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
+| `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
 | `--output` | `-o` | string | stdout | Output destination (file or stdout) |
@@ -717,6 +718,62 @@ aicr validate \
   --toleration gpu-type=h100:NoSchedule
 ```
 
+#### Validate Config File Mode
+
+`aicr validate --config <path>` reads inputs from an AICRConfig YAML/JSON file
+under `spec.validate`. CLI flags always override values loaded from `--config`;
+override events are logged at INFO so users can see which input won.
+
+Evidence-related flags (`--evidence-dir`, `--cncf-submission`, `--feature`) are
+CLI-only and not sourced from `--config` (tracked in
+[#754](https://github.com/NVIDIA/aicr/issues/754)).
+
+**Supported schema:**
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: prod-validate
+spec:
+  validate:
+    input:
+      recipe: ./recipe.yaml
+      snapshot: ./snapshot.yaml          # optional; omit to capture live
+    agent:                               # only used when input.snapshot is empty
+      namespace: aicr-validation
+      image: ghcr.io/nvidia/aicr:v0.1.0
+      imagePullSecrets: [registry-secret]
+      jobName: aicr-validate
+      serviceAccountName: aicr
+      nodeSelector:
+        my-org/gpu-pool: "true"
+      tolerations:
+        - "gpu-type=h100:NoSchedule"
+      requireGpu: true
+    execution:
+      phases: [deployment, conformance]
+      failOnError: true                  # default true; set false to report only
+      noCluster: false
+      noCleanup: false
+      timeout: 10m
+```
+
+**Examples:**
+
+```shell
+# Use a config file
+aicr validate --config validate.yaml
+
+# Override a single config value from the CLI
+aicr validate --config validate.yaml --phase deployment
+
+# Validate the same recipe across two clusters using two different agent
+# configs (config-bound) without retyping flags
+aicr validate --config validate-cluster-a.yaml
+aicr validate --config validate-cluster-b.yaml
+```
+
 #### Workload Scheduling
 
 The `--node-selector` and `--toleration` flags control scheduling for **validation
@@ -836,6 +893,68 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 
 ---
 
+### aicr diff
+
+Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology).
+
+**Synopsis:**
+```shell
+aicr diff --baseline <path|cm://...> --target <path|cm://...> [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--baseline` | `-b` | string | | Baseline snapshot (file path or ConfigMap URI). **Required.** |
+| `--target` | | string | | Target snapshot (file path or ConfigMap URI). **Required.** |
+| `--fail-on-drift` | | bool | false | Exit with non-zero status (`ErrCodeConflict`) if any drift is detected. Useful for CI/CD gating. |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. **Note:** ConfigMap destinations are rejected for `--format table` (a structured format is required for ConfigMap storage). |
+| `--format` | `-t` | string | yaml | Output format: `json`, `yaml`, or `table`. |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig (used only when `--baseline` or `--target` is a ConfigMap URI). |
+
+**Inputs:**
+- File paths (`./baseline.yaml`, `/tmp/snap.json`)
+- ConfigMap URIs (`cm://gpu-operator/aicr-snapshot`)
+- Both inputs may mix freely; e.g., a local baseline file vs. a live ConfigMap target.
+
+**Output Semantics:**
+- A nil reading is rendered as the literal `<nil>` so it cannot be confused with an empty-string value (`""`). Both forms surface as drift when one side is nil and the other is a concrete value.
+- Changes are emitted in deterministic order (sorted by `Path`) so the diff is reproducible across runs and machines.
+- The `Result` envelope includes `baselineSource` and `targetSource` (the supplied paths), a `changes` array, and a `summary` with `added`, `removed`, `modified`, and `total` counts.
+
+**Examples:**
+
+```shell
+# Local-file diff in default YAML
+aicr diff --baseline before.yaml --target after.yaml
+
+# Human-readable table to stdout
+aicr diff -b before.yaml --target after.yaml --format table
+
+# CI/CD gate: non-zero exit on drift, JSON to a file
+aicr diff -b before.yaml --target after.yaml \
+  --format json --output drift.json --fail-on-drift
+
+# Compare two ConfigMaps in the cluster
+aicr diff \
+  --baseline cm://gpu-operator/aicr-snapshot-baseline \
+  --target   cm://gpu-operator/aicr-snapshot
+
+# Mix file + ConfigMap (golden baseline vs live cluster)
+aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
+```
+
+**Exit Codes:**
+
+| Code | Description |
+|------|-------------|
+| `0` | Diff completed; no drift, or `--fail-on-drift` not set |
+| `2` | Invalid input (missing flags, bad format, ConfigMap output for `--format table`) **or** drift detected with `--fail-on-drift` (mapped from `ErrCodeConflict`) |
+
+> **Note on CI gating:** A non-zero exit identifies *that* drift was detected, but doesn't by itself distinguish drift from malformed input — both map to exit `2`. To differentiate without relying on stderr format (text by default; JSON only with `--log-json`), inspect the diff payload directly: write the result with `--output drift.json --format json` and branch on the presence of the file plus its `summary.total` field. That signal is format-stable regardless of logging mode.
+
+---
+
 ### aicr bundle
 
 Generate deployment-ready bundles from recipes containing Helm values, manifests, scripts, and documentation.
@@ -864,6 +983,7 @@ aicr bundle [flags]
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
+| `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
@@ -1101,6 +1221,74 @@ aicr bundle -r recipe.yaml --deployer argocd \
 aicr bundle -r recipe.yaml \
   --deployer argocd \
   -o ./bundles
+```
+
+#### Vendoring Charts for Air-Gap
+
+The `--vendor-charts` flag pulls upstream Helm chart bytes into the bundle at bundle time. With the flag set, every Helm-typed component becomes a local chart inside the generated bundle and the resulting artifact deploys end-to-end with zero registry egress. Without the flag, deploy-time `helm upgrade --install` calls fetch from the upstream repository — which works for connected clusters but breaks in air-gapped environments.
+
+**Bundle-time requirement:** the `helm` binary must be on `$PATH` when `aicr bundle --vendor-charts` runs. Authentication for private chart registries flows through Helm's own conventions:
+
+- **HTTP(S) repositories** — `HELM_REPOSITORY_USERNAME` / `HELM_REPOSITORY_PASSWORD` environment variables.
+- **OCI registries** — standard docker config (`~/.docker/config.json` or `$DOCKER_CONFIG`); run `docker login <registry>` ahead of time.
+
+**Tradeoff: CVE-yank fail-loud signal is lost.** Non-vendored bundles fail loudly when an upstream chart version is yanked at registry time, which prompts a rebundle with a fixed recipe. Vendored bundles freeze the chart bytes at bundle creation and silently install the frozen version even after upstream yank. Treat `provenance.yaml` (below) as the audit surface for cross-referencing yank lists.
+
+**Bundle-time costs.** Vendoring adds bundle-time network egress (the chart pull), bundle-time auth surface (private registries need credentials at the bundle host), and bundle size (typically 0.5–5 MB unpacked per chart). Users who don't need air-gap shouldn't set `--vendor-charts` and shouldn't pay these costs.
+
+**Bundle layout with `--vendor-charts`** — every Helm component emits a single wrapper folder (mixed components no longer split into a primary + `-post` pair):
+
+```text
+my-bundle/
+  001-gpu-operator/
+    Chart.yaml                     # wrapper, declares the vendored subchart
+    charts/gpu-operator-v25.3.0.tgz # vendored upstream tarball
+    values.yaml                    # values nested under the subchart name
+    cluster-values.yaml            # dynamic values, also nested
+    install.sh                     # helm upgrade --install <name> ./<dir> ...
+  002-alloy/
+    Chart.yaml
+    charts/alloy-1.2.3.tgz
+    templates/                     # for mixed components: raw manifests
+      clusterrole.yaml             #   with helm.sh/hook: post-install
+    values.yaml
+    cluster-values.yaml
+    install.sh
+  provenance.yaml                  # bundle-time audit log
+  ...
+```
+
+**`provenance.yaml`** sits at the bundle root and lists one entry per vendored chart, using the same K8s-style `apiVersion`/`kind` shape as the rest of AICR's persisted formats:
+
+```yaml
+apiVersion: aicr.nvidia.com/v1alpha1
+kind: BundleProvenance
+vendoredCharts:
+  - name: gpu-operator
+    chart: gpu-operator
+    version: v25.3.0
+    repository: https://helm.ngc.nvidia.com/nvidia
+    sha256: abc123...
+    tarballName: gpu-operator-v25.3.0.tgz
+    pullerVersion: helm-cli v3.20.2
+```
+
+The `sha256` field is the digest of the bytes copied into `charts/`, suitable for yank-list lookups and cross-bundle drift comparisons. Pipe through `yq -o=json provenance.yaml` if your scanner expects JSON.
+
+**Examples:**
+
+```bash
+# Vendor everything for an air-gap deployment
+aicr bundle --recipe recipe.yaml --vendor-charts -o ./bundle
+
+# Vendor with private OCI registry credentials
+docker login nvcr.io
+aicr bundle --recipe recipe.yaml --vendor-charts -o ./bundle
+
+# Vendor with private HTTP(S) chart repo credentials
+HELM_REPOSITORY_USERNAME=robot \
+HELM_REPOSITORY_PASSWORD=secret \
+  aicr bundle --recipe recipe.yaml --vendor-charts -o ./bundle
 ```
 
 #### Dynamic Install-Time Values
@@ -1931,6 +2119,8 @@ aicr bundle --help  # Shows available bundlers
 # Run with debug
 aicr --debug bundle -r recipe.yaml
 ```
+
+**"helm CLI not found on PATH" with `--vendor-charts`** — the bundle-time vendoring path shells out to `helm pull`. Install Helm v3 or later (`brew install helm` / package manager) and re-run, or drop `--vendor-charts` for a registry-referencing bundle. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap).
 
 ## External Data Directory
 
