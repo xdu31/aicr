@@ -573,8 +573,9 @@ aicr validate [flags]
 **Flags:**
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--recipe` | `-r` | string | (required) | Path/URI to recipe file containing constraints |
+| `--recipe` | `-r` | string | (required) | Path/URI to recipe file containing constraints (or via `spec.validate.input.recipe` in `--config`) |
 | `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
+| `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
 | `--output` | `-o` | string | stdout | Output destination (file or stdout) |
@@ -717,6 +718,62 @@ aicr validate \
   --toleration gpu-type=h100:NoSchedule
 ```
 
+#### Validate Config File Mode
+
+`aicr validate --config <path>` reads inputs from an AICRConfig YAML/JSON file
+under `spec.validate`. CLI flags always override values loaded from `--config`;
+override events are logged at INFO so users can see which input won.
+
+Evidence-related flags (`--evidence-dir`, `--cncf-submission`, `--feature`) are
+CLI-only and not sourced from `--config` (tracked in
+[#754](https://github.com/NVIDIA/aicr/issues/754)).
+
+**Supported schema:**
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: prod-validate
+spec:
+  validate:
+    input:
+      recipe: ./recipe.yaml
+      snapshot: ./snapshot.yaml          # optional; omit to capture live
+    agent:                               # only used when input.snapshot is empty
+      namespace: aicr-validation
+      image: ghcr.io/nvidia/aicr:v0.1.0
+      imagePullSecrets: [registry-secret]
+      jobName: aicr-validate
+      serviceAccountName: aicr
+      nodeSelector:
+        my-org/gpu-pool: "true"
+      tolerations:
+        - "gpu-type=h100:NoSchedule"
+      requireGpu: true
+    execution:
+      phases: [deployment, conformance]
+      failOnError: true                  # default true; set false to report only
+      noCluster: false
+      noCleanup: false
+      timeout: 10m
+```
+
+**Examples:**
+
+```shell
+# Use a config file
+aicr validate --config validate.yaml
+
+# Override a single config value from the CLI
+aicr validate --config validate.yaml --phase deployment
+
+# Validate the same recipe across two clusters using two different agent
+# configs (config-bound) without retyping flags
+aicr validate --config validate-cluster-a.yaml
+aicr validate --config validate-cluster-b.yaml
+```
+
 #### Workload Scheduling
 
 The `--node-selector` and `--toleration` flags control scheduling for **validation
@@ -833,6 +890,68 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | `0` | All checks passed |
 | `2` | Invalid input (bad flags, missing recipe) |
 | `8` | One or more checks failed (when `--fail-on-error` is set) |
+
+---
+
+### aicr diff
+
+Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology).
+
+**Synopsis:**
+```shell
+aicr diff --baseline <path|cm://...> --target <path|cm://...> [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--baseline` | `-b` | string | | Baseline snapshot (file path or ConfigMap URI). **Required.** |
+| `--target` | | string | | Target snapshot (file path or ConfigMap URI). **Required.** |
+| `--fail-on-drift` | | bool | false | Exit with non-zero status (`ErrCodeConflict`) if any drift is detected. Useful for CI/CD gating. |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. **Note:** ConfigMap destinations are rejected for `--format table` (a structured format is required for ConfigMap storage). |
+| `--format` | `-t` | string | yaml | Output format: `json`, `yaml`, or `table`. |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig (used only when `--baseline` or `--target` is a ConfigMap URI). |
+
+**Inputs:**
+- File paths (`./baseline.yaml`, `/tmp/snap.json`)
+- ConfigMap URIs (`cm://gpu-operator/aicr-snapshot`)
+- Both inputs may mix freely; e.g., a local baseline file vs. a live ConfigMap target.
+
+**Output Semantics:**
+- A nil reading is rendered as the literal `<nil>` so it cannot be confused with an empty-string value (`""`). Both forms surface as drift when one side is nil and the other is a concrete value.
+- Changes are emitted in deterministic order (sorted by `Path`) so the diff is reproducible across runs and machines.
+- The `Result` envelope includes `baselineSource` and `targetSource` (the supplied paths), a `changes` array, and a `summary` with `added`, `removed`, `modified`, and `total` counts.
+
+**Examples:**
+
+```shell
+# Local-file diff in default YAML
+aicr diff --baseline before.yaml --target after.yaml
+
+# Human-readable table to stdout
+aicr diff -b before.yaml --target after.yaml --format table
+
+# CI/CD gate: non-zero exit on drift, JSON to a file
+aicr diff -b before.yaml --target after.yaml \
+  --format json --output drift.json --fail-on-drift
+
+# Compare two ConfigMaps in the cluster
+aicr diff \
+  --baseline cm://gpu-operator/aicr-snapshot-baseline \
+  --target   cm://gpu-operator/aicr-snapshot
+
+# Mix file + ConfigMap (golden baseline vs live cluster)
+aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
+```
+
+**Exit Codes:**
+
+| Code | Description |
+|------|-------------|
+| `0` | Diff completed; no drift, or `--fail-on-drift` not set |
+| `2` | Invalid input (missing flags, bad format, ConfigMap output for `--format table`) **or** drift detected with `--fail-on-drift` (mapped from `ErrCodeConflict`) |
+
+> **Note on CI gating:** A non-zero exit identifies *that* drift was detected, but doesn't by itself distinguish drift from malformed input — both map to exit `2`. To differentiate without relying on stderr format (text by default; JSON only with `--log-json`), inspect the diff payload directly: write the result with `--output drift.json --format json` and branch on the presence of the file plus its `summary.total` field. That signal is format-stable regardless of logging mode.
 
 ---
 
