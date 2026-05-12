@@ -54,10 +54,10 @@ type webhookRejectionReport struct {
 
 // recipeHasComponent checks if a named component exists in the validation's componentRefs.
 func recipeHasComponent(ctx *validators.Context, name string) bool {
-	if ctx.Validation == nil {
+	if ctx.ValidationInput == nil {
 		return false
 	}
-	for _, ref := range ctx.Validation.ComponentRefs {
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
 		if ref.Name == name {
 			return true
 		}

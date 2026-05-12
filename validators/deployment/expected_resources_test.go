@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
@@ -845,10 +846,10 @@ func newDeploymentTestContextWithDiscovery(
 	}
 
 	return &validators.Context{
-		Ctx:           context.Background(),
-		Clientset:     clientset,
-		DynamicClient: dynClient,
-		Validation:    recipe.ToValidation(rec),
+		Ctx:             context.Background(),
+		Clientset:       clientset,
+		DynamicClient:   dynClient,
+		ValidationInput: v1.ToValidationInput(rec),
 	}
 }
 

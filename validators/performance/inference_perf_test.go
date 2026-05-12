@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	validatorv1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	v1 "k8s.io/api/core/v1"
@@ -40,19 +41,19 @@ func TestHasDynamoPlatform(t *testing.T) {
 	}{
 		{
 			name: "nil validation",
-			ctx:  &validators.Context{Validation: nil},
+			ctx:  &validators.Context{ValidationInput: nil},
 			want: false,
 		},
 		{
 			name: "empty componentRefs",
-			ctx: &validators.Context{Validation: recipe.ToValidation(&recipe.RecipeResult{
+			ctx: &validators.Context{ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{
 				ComponentRefs: nil,
 			})},
 			want: false,
 		},
 		{
 			name: "componentRefs without dynamo-platform",
-			ctx: &validators.Context{Validation: recipe.ToValidation(&recipe.RecipeResult{
+			ctx: &validators.Context{ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
 					{Name: "gpu-operator"},
 					{Name: "kubeflow-trainer"},
@@ -62,7 +63,7 @@ func TestHasDynamoPlatform(t *testing.T) {
 		},
 		{
 			name: "dynamo-platform present",
-			ctx: &validators.Context{Validation: recipe.ToValidation(&recipe.RecipeResult{
+			ctx: &validators.Context{ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
 					{Name: "gpu-operator"},
 					{Name: "dynamo-platform"},

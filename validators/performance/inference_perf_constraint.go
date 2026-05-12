@@ -284,10 +284,10 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 
 // hasDynamoPlatform checks if dynamo-platform is in the validation ComponentRefs.
 func hasDynamoPlatform(ctx *validators.Context) bool {
-	if ctx.Validation == nil {
+	if ctx.ValidationInput == nil {
 		return false
 	}
-	for _, ref := range ctx.Validation.ComponentRefs {
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
 		if ref.Name == "dynamo-platform" {
 			return true
 		}

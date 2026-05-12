@@ -90,10 +90,10 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 }
 
 func findPerformanceConstraint(ctx *validators.Context, name string) (recipe.Constraint, bool) {
-	if ctx.Validation == nil || ctx.Validation.Performance == nil {
+	if ctx.ValidationInput == nil || ctx.ValidationInput.Config.Performance == nil {
 		return recipe.Constraint{}, false
 	}
-	for _, c := range ctx.Validation.Performance.Constraints {
+	for _, c := range ctx.ValidationInput.Config.Performance.Constraints {
 		if c.Name == name {
 			return c, true
 		}
