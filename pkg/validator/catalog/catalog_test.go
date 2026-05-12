@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -31,11 +32,11 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
-	if catalog.APIVersion != expectedAPIVersion {
-		t.Errorf("APIVersion = %q, want %q", catalog.APIVersion, expectedAPIVersion)
+	if catalog.APIVersion != v1.CatalogAPIVersion {
+		t.Errorf("APIVersion = %q, want %q", catalog.APIVersion, v1.CatalogAPIVersion)
 	}
-	if catalog.Kind != expectedKind {
-		t.Errorf("Kind = %q, want %q", catalog.Kind, expectedKind)
+	if catalog.Kind != v1.CatalogKind {
+		t.Errorf("Kind = %q, want %q", catalog.Kind, v1.CatalogKind)
 	}
 	if catalog.Metadata == nil {
 		t.Fatal("Metadata is nil")
@@ -53,7 +54,7 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 
 func TestParseValidCatalog(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test-catalog
@@ -116,7 +117,7 @@ validators:
 
 func TestForPhase(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -189,7 +190,7 @@ validators: []
 
 func TestParseInvalidKind(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: WrongKind
 metadata:
   name: test
@@ -204,7 +205,7 @@ validators: []
 
 func TestParseDuplicateNames(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -225,7 +226,7 @@ validators:
 
 func TestParseEmptyName(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -243,7 +244,7 @@ validators:
 
 func TestParseInvalidPhase(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -261,7 +262,7 @@ validators:
 
 func TestParseEmptyImage(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -378,7 +379,7 @@ func TestLoadWithExternalCatalog(t *testing.T) {
 	// Create external data directory with registry.yaml (required) and catalog
 	tmpDir := t.TempDir()
 
-	registryContent := `apiVersion: aicr.nvidia.com/v1alpha1
+	registryContent := `apiVersion: validator.nvidia.com/v1alpha1alpha1
 kind: ComponentRegistry
 components: []
 `
@@ -391,7 +392,7 @@ components: []
 		t.Fatalf("failed to create validators dir: %v", err)
 	}
 
-	externalCatalog := `apiVersion: aicr.nvidia.com/v1
+	externalCatalog := `apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: external-validators
