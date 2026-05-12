@@ -15,6 +15,7 @@
 package catalog
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -867,12 +868,13 @@ func TestCatalogOmitEmpty(t *testing.T) {
 		},
 	}
 
-	data, err := yaml.Marshal(catalog)
+	// Test YAML marshaling
+	yamlData, err := yaml.Marshal(catalog)
 	if err != nil {
 		t.Fatalf("yaml.Marshal() failed: %v", err)
 	}
 
-	yamlStr := string(data)
+	yamlStr := string(yamlData)
 	// Verify optional fields are omitted
 	if strings.Contains(yamlStr, "apiVersion:") {
 		t.Error("YAML should not contain apiVersion when empty")
@@ -888,13 +890,36 @@ func TestCatalogOmitEmpty(t *testing.T) {
 	if !strings.Contains(yamlStr, "validators:") {
 		t.Error("YAML should contain validators")
 	}
+
+	// Test JSON marshaling
+	jsonData, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("json.Marshal() failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	// Verify optional fields are omitted in JSON
+	if strings.Contains(jsonStr, "apiVersion") {
+		t.Error("JSON should not contain apiVersion when empty")
+	}
+	if strings.Contains(jsonStr, "kind") {
+		t.Error("JSON should not contain kind when empty")
+	}
+	if strings.Contains(jsonStr, "metadata") {
+		t.Error("JSON should not contain metadata when nil")
+	}
+
+	// But required field should be present
+	if !strings.Contains(jsonStr, "validators") {
+		t.Error("JSON should contain validators")
+	}
 }
 
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {
-		Catalog ValidatorCatalog `yaml:"catalog"`
-		Enabled bool             `yaml:"enabled"`
+		Catalog ValidatorCatalog `json:"catalog" yaml:"catalog"`
+		Enabled bool             `json:"enabled" yaml:"enabled"`
 	}
 
 	spec := ValidatorCatalogSpec{
@@ -913,12 +938,13 @@ func TestCatalogEmbedding(t *testing.T) {
 		Enabled: true,
 	}
 
-	data, err := yaml.Marshal(spec)
+	// Test YAML marshaling
+	yamlData, err := yaml.Marshal(spec)
 	if err != nil {
 		t.Fatalf("yaml.Marshal() failed: %v", err)
 	}
 
-	yamlStr := string(data)
+	yamlStr := string(yamlData)
 	// Verify clean embedding without resource metadata
 	if strings.Contains(yamlStr, "apiVersion:") {
 		t.Error("Embedded catalog should not contain apiVersion")
@@ -928,5 +954,23 @@ func TestCatalogEmbedding(t *testing.T) {
 	}
 	if strings.Contains(yamlStr, "metadata:") {
 		t.Error("Embedded catalog should not contain metadata")
+	}
+
+	// Test JSON marshaling
+	jsonData, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("json.Marshal() failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	// Verify clean embedding without resource metadata in JSON
+	if strings.Contains(jsonStr, "apiVersion") {
+		t.Error("Embedded catalog should not contain apiVersion in JSON")
+	}
+	if strings.Contains(jsonStr, "kind") {
+		t.Error("Embedded catalog should not contain kind in JSON")
+	}
+	if strings.Contains(jsonStr, "metadata") {
+		t.Error("Embedded catalog should not contain metadata in JSON")
 	}
 }
