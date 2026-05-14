@@ -594,6 +594,13 @@ aicr validate [flags]
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
 | `--feature` | `-f` | string[] | | Feature flags for validation (repeatable) |
+| `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [ADR-007](../design/007-recipe-evidence.md). |
+| `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
+| `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
+| `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
+| `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
+| `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
+| `--oidc-device-flow` | | bool | false | Use the OAuth 2.0 device authorization grant for `--push` OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. |
 | `--data` | | string | | External data directory to overlay on embedded data |
 
 **Input Sources:**
@@ -704,6 +711,28 @@ aicr validate \
   --snapshot cm://gpu-operator/aicr-snapshot \
   --kubeconfig ~/.kube/prod-cluster
 
+# Write a recipe-evidence v1 attestation bundle (unsigned, on disk).
+# --bom is optional: when omitted, aicr synthesizes a recipe-bound BOM from
+# the recipe's component refs and validator catalog images.
+aicr validate \
+  --recipe recipe.yaml --snapshot snapshot.yaml \
+  --emit-attestation ./out
+# Writes ./out/summary-bundle/ and ./out/pointer.yaml.
+
+# Use an exhaustive BOM (e.g., `make bom`-produced) instead of the auto-generated one
+aicr validate \
+  --recipe recipe.yaml --snapshot snapshot.yaml \
+  --emit-attestation ./out --bom dist/bom/bom.cdx.json
+
+# Sign and push a recipe-evidence bundle to OCI (cosign keyless via Sigstore public-good).
+# Token acquisition follows the same precedence chain as `aicr bundle --attest`:
+# pre-fetched COSIGN_IDENTITY_TOKEN > ambient GitHub Actions OIDC > --oidc-device-flow > interactive browser.
+aicr validate \
+  --recipe recipe.yaml --snapshot snapshot.yaml \
+  --emit-attestation ./out \
+  --push ghcr.io/myorg/aicr-evidence
+# After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
+
 # Validate on a cluster with custom GPU node labels (non-standard labels that AICR doesn't
 # recognize by default, e.g., using a custom node pool label instead of cloud-provider defaults)
 aicr validate \
@@ -722,11 +751,10 @@ aicr validate \
 
 `aicr validate --config <path>` reads inputs from an AICRConfig YAML/JSON file
 under `spec.validate`. CLI flags always override values loaded from `--config`;
-override events are logged at INFO so users can see which input won.
-
-Evidence-related flags (`--evidence-dir`, `--cncf-submission`, `--feature`) are
-CLI-only and not sourced from `--config` (tracked in
-[#754](https://github.com/NVIDIA/aicr/issues/754)).
+override events are logged at INFO so users can see which input won. The OIDC
+identity token used for `--push` signing stays out of the schema by design
+(short-lived tokens must not be committed); the CLI resolves it at sign time
+through the precedence chain described on `--identity-token`.
 
 **Supported schema:**
 
@@ -757,6 +785,17 @@ spec:
       noCluster: false
       noCleanup: false
       timeout: 10m
+    evidence:
+      cncf:                              # --evidence-dir / --cncf-submission / --feature
+        dir: ./out/cncf
+        cncfSubmission: false
+        features: []                     # empty = all features
+      attestation:                       # --emit-attestation / --bom / --push / ...
+        out: ./out/attestation
+        bom: dist/bom/bom.cdx.json       # optional; auto-generated from recipe + validators when absent
+        push: ghcr.io/myorg/aicr-evidence
+        plainHTTP: false
+        insecureTLS: false
 ```
 
 **Examples:**
@@ -1072,7 +1111,7 @@ aicr bundle --recipe recipe.yaml \
 This results in:
 - **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
 - **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
-- **System components** (gpu-operator controller, NFD gc/master, dynamo grove, kgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
+- **System components** (gpu-operator controller, NFD gc/master, dynamo grove, agentgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 
 **Behavior:**
 - All components from the recipe are bundled automatically
@@ -1848,6 +1887,42 @@ aicr verify ./my-bundle --format json
 ```
 
 > **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
+
+---
+
+### aicr evidence verify
+
+Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. Recomputes every file's sha256 against the bundle's `manifest.json` (which is bound to the predicate's `manifest.digest`) and surfaces the predicate's fingerprint, phase counts, and BOM info.
+
+Only directory input is supported today. Cryptographic signature verification, inline constraint replay, OCI pull, and pointer-file support are not yet implemented.
+
+**Synopsis:**
+```shell
+aicr evidence verify <directory> [flags]
+```
+
+**Flags:**
+| Flag | Alias | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--output` | `-o` | string | | Write output to this file. When empty, output goes to stdout. |
+| `--format` | `-t` | string | `text` | Output format: `text` (Markdown) or `json`. Applies regardless of destination. |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Bundle valid; every check passed. |
+| 2 | Bundle invalid (manifest hash mismatch or predicate malformed), OR recorded validator results show failures. |
+
+The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the library API) still distinguishes the two non-zero cases as `1` (recorded phase failures) vs `2` (bundle invalid).
+
+**Examples:**
+```shell
+aicr evidence verify ./out/summary-bundle                  # Markdown to stdout
+aicr evidence verify ./out/summary-bundle -o summary.md    # Markdown to file
+aicr evidence verify ./out/summary-bundle -t json          # JSON to stdout
+aicr evidence verify ./out/summary-bundle -o r.json -t json   # JSON to file
+```
 
 ---
 
