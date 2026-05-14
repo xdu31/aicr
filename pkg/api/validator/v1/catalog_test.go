@@ -16,8 +16,6 @@ package v1
 
 import (
 	"testing"
-
-	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 func TestFilterEntriesByValidation_NilValidation(t *testing.T) {
@@ -114,12 +112,12 @@ func TestFilterEntriesByValidation_MultipleChecks(t *testing.T) {
 
 func TestFilterEntriesByValidation_AllPhases(t *testing.T) {
 	tests := []struct {
-		name     string
-		phase    Phase
-		entries  []ValidatorEntry
-		rec      *recipe.RecipeResult
-		expected int
-		names    []string
+		name            string
+		phase           Phase
+		entries         []ValidatorEntry
+		validationInput *ValidationInput
+		expected        int
+		names           []string
 	}{
 		{
 			name:  "deployment phase filters correctly",
@@ -128,9 +126,9 @@ func TestFilterEntriesByValidation_AllPhases(t *testing.T) {
 				{Name: "operator-health", Phase: "deployment"},
 				{Name: "expected-resources", Phase: "deployment"},
 			},
-			rec: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Deployment: &recipe.ValidationPhase{
+			validationInput: &ValidationInput{
+				Config: ValidationConfig{
+					Deployment: &ValidationPhase{
 						Checks: []string{"operator-health"},
 					},
 				},
@@ -145,9 +143,9 @@ func TestFilterEntriesByValidation_AllPhases(t *testing.T) {
 				{Name: "nccl-all-reduce-bw", Phase: "performance"},
 				{Name: "inference-perf", Phase: "performance"},
 			},
-			rec: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Performance: &recipe.ValidationPhase{
+			validationInput: &ValidationInput{
+				Config: ValidationConfig{
+					Performance: &ValidationPhase{
 						Checks: []string{"nccl-all-reduce-bw"},
 					},
 				},
@@ -162,9 +160,9 @@ func TestFilterEntriesByValidation_AllPhases(t *testing.T) {
 				{Name: "dra-support", Phase: "conformance"},
 				{Name: "gang-scheduling", Phase: "conformance"},
 			},
-			rec: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Conformance: &recipe.ValidationPhase{
+			validationInput: &ValidationInput{
+				Config: ValidationConfig{
+					Conformance: &ValidationPhase{
 						Checks: []string{"dra-support"},
 					},
 				},
@@ -176,31 +174,15 @@ func TestFilterEntriesByValidation_AllPhases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validationInput := &ValidationInput{}
-			if tt.rec.Validation != nil {
-				if tt.rec.Validation.Deployment != nil {
-					validationInput.Config.Deployment = &ValidationPhase{
-						Checks: tt.rec.Validation.Deployment.Checks,
-					}
-				}
-				if tt.rec.Validation.Performance != nil {
-					validationInput.Config.Performance = &ValidationPhase{
-						Checks: tt.rec.Validation.Performance.Checks,
-					}
-				}
-				if tt.rec.Validation.Conformance != nil {
-					validationInput.Config.Conformance = &ValidationPhase{
-						Checks: tt.rec.Validation.Conformance.Checks,
-					}
-				}
-			}
-			got := FilterEntriesByValidation(tt.entries, tt.phase, validationInput)
+			got := FilterEntriesByValidation(tt.entries, tt.phase, tt.validationInput)
 			if len(got) != tt.expected {
 				t.Errorf("FilterEntriesByValidation() returned %d entries, want %d", len(got), tt.expected)
 			}
 			if tt.names != nil {
 				for i, name := range tt.names {
-					if i >= len(got) || got[i].Name != name {
+					if i >= len(got) {
+						t.Errorf("FilterEntriesByValidation() missing entry[%d], want %q (got only %d entries)", i, name, len(got))
+					} else if got[i].Name != name {
 						t.Errorf("FilterEntriesByValidation() entry[%d] = %q, want %q", i, got[i].Name, name)
 					}
 				}

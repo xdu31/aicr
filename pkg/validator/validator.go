@@ -259,9 +259,8 @@ func (v *Validator) runPhase(
 	start := time.Now()
 	allEntries := cat.ForPhase(phase)
 
-	// Filter catalog entries by what the validation declares.
-	// If the validation has checks for this phase, only run those.
-	// If no checks are declared, run all catalog entries for the phase.
+	// Filter catalog entries by checks declared in the validation for this phase.
+	// Returns an empty set if no checks are declared for the phase.
 	entries := v1.FilterEntriesByValidation(allEntries, phase, validationInput)
 	slog.Info("running validation phase", "phase", phase,
 		"catalog", len(allEntries), "selected", len(entries))
