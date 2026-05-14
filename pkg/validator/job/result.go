@@ -26,13 +26,20 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	// ValidatorContainerName is the required name for the validator container.
+	// This is part of the validator package contract to ensure sidecar-safety.
+	ValidatorContainerName = "validator"
+)
+
 // ExtractResult reads the exit code, termination message, and stdout from the
 // "validator" container in a completed validator pod.
 //
-// CONTRACT (ADR-002): The container name MUST be "validator". This is a frozen
-// public contract to ensure sidecar-safety — ExtractResult will only read from
-// the "validator" container, ignoring any sidecar containers that may be
-// injected by external controllers (e.g., log streaming, result processing).
+// CONTRACT: The container name MUST be "validator". This is a frozen public
+// contract of the validator package to ensure sidecar-safety — ExtractResult
+// will only read from the "validator" container, ignoring any sidecar containers
+// that may be injected by external controllers (e.g., log streaming, result
+// processing).
 //
 // Returns a ValidatorResult regardless of how the container terminated — the
 // caller maps the result to a CTRF status.
@@ -54,11 +61,11 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		return result
 	}
 
-	// Extract container status from "validator" container (ADR-002 contract)
-	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, "validator")
+	// Extract container status from "validator" container
+	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
 	if !found {
 		result.ExitCode = -1
-		result.TerminationMsg = "container 'validator' not found (ADR-002 violation)"
+		result.TerminationMsg = fmt.Sprintf("container %q not found (validator package contract)", ValidatorContainerName)
 		return result
 	}
 	switch {
@@ -84,8 +91,8 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		result.TerminationMsg = "container still running after wait completed"
 	}
 
-	// Capture stdout from pod logs (explicit container name per ADR-002)
-	logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, "validator")
+	// Capture stdout from pod logs (explicit container name)
+	logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ValidatorContainerName)
 	if logErr != nil {
 		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
 		// Not fatal — we still have exit code and termination message
@@ -115,20 +122,20 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 		return result
 	}
 
-	// Try to get logs from "validator" container (ADR-002 contract)
-	if logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, "validator"); logErr == nil && logs != "" {
+	// Check container status from "validator" container first (before fetching logs)
+	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
+	if !found {
+		result.ExitCode = -1
+		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container %q not found - validator package contract)", d.entry.Timeout, ValidatorContainerName)
+		return result
+	}
+
+	// Try to get logs from "validator" container
+	if logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ValidatorContainerName); logErr == nil && logs != "" {
 		result.Stdout = filterStdoutLines(
 			truncateLogLines(logs, defaults.ValidatorMaxStdoutLines),
 			defaults.ValidatorMaxStdoutLineLength,
 		)
-	}
-
-	// Try to get container status from "validator" container (ADR-002 contract)
-	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, "validator")
-	if !found {
-		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container 'validator' not found)", d.entry.Timeout)
-		return result
 	}
 
 	if cs.State.Terminated != nil {
@@ -185,7 +192,7 @@ func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
 // and false if not found.
 //
 // This helper ensures sidecar-safety by allowing explicit container name lookup
-// instead of assuming index 0 is the validator container (ADR-002).
+// instead of assuming index 0 is the validator container.
 func findContainerStatus(statuses []corev1.ContainerStatus, name string) (corev1.ContainerStatus, bool) {
 	for _, cs := range statuses {
 		if cs.Name == name {

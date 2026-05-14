@@ -39,7 +39,7 @@ func createPodForJob(t *testing.T, ns, jobName string, status corev1.PodStatus) 
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
-				Name:  "validator",
+				Name:  ValidatorContainerName,
 				Image: "busybox",
 			}},
 		},
@@ -75,7 +75,7 @@ func TestExtractResultTerminatedPass(t *testing.T) {
 	start := metav1.NewTime(now.Add(-15 * time.Second))
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Terminated: &corev1.ContainerStateTerminated{
 					ExitCode:   0,
@@ -109,7 +109,7 @@ func TestExtractResultTerminatedFail(t *testing.T) {
 
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Terminated: &corev1.ContainerStateTerminated{
 					ExitCode: 1,
@@ -138,7 +138,7 @@ func TestExtractResultTerminatedSkip(t *testing.T) {
 
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Terminated: &corev1.ContainerStateTerminated{
 					ExitCode: 2,
@@ -163,7 +163,7 @@ func TestExtractResultOOMKilled(t *testing.T) {
 
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Terminated: &corev1.ContainerStateTerminated{
 					ExitCode: 137,
@@ -192,7 +192,7 @@ func TestExtractResultWaiting(t *testing.T) {
 
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Waiting: &corev1.ContainerStateWaiting{
 					Reason:  "ImagePullBackOff",
@@ -221,7 +221,7 @@ func TestExtractResultRunning(t *testing.T) {
 
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Running: &corev1.ContainerStateRunning{},
 			},
@@ -251,8 +251,11 @@ func TestExtractResultValidatorContainerNotFound(t *testing.T) {
 	if result.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
 	}
-	if result.TerminationMsg != "container 'validator' not found (ADR-002 violation)" {
-		t.Errorf("TerminationMsg = %q", result.TerminationMsg)
+	if !strings.Contains(result.TerminationMsg, ValidatorContainerName) {
+		t.Errorf("TerminationMsg = %q, want message containing %q", result.TerminationMsg, ValidatorContainerName)
+	}
+	if !strings.Contains(result.TerminationMsg, "not found") {
+		t.Errorf("TerminationMsg = %q, want message containing 'not found'", result.TerminationMsg)
 	}
 }
 
@@ -281,7 +284,7 @@ func TestExtractResultPreservesNameAndPhase(t *testing.T) {
 
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
 			},
@@ -318,7 +321,7 @@ func TestHandleTimeoutContainerNotTerminated(t *testing.T) {
 
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Running: &corev1.ContainerStateRunning{},
 			},
@@ -343,7 +346,7 @@ func TestHandleTimeoutContainerTerminated(t *testing.T) {
 	start := metav1.NewTime(now.Add(-120 * time.Second))
 	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 		ContainerStatuses: []corev1.ContainerStatus{{
-			Name: "validator",
+			Name: ValidatorContainerName,
 			State: corev1.ContainerState{
 				Terminated: &corev1.ContainerStateTerminated{
 					ExitCode:   137,
@@ -380,7 +383,7 @@ func TestExtractResultWithSidecar(t *testing.T) {
 				},
 			},
 			{
-				Name: "validator",
+				Name: ValidatorContainerName,
 				State: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode:   0,
@@ -429,8 +432,11 @@ func TestExtractResultSidecarOnlyNoValidator(t *testing.T) {
 	if result.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
 	}
-	if result.TerminationMsg != "container 'validator' not found (ADR-002 violation)" {
-		t.Errorf("TerminationMsg = %q, want ADR-002 violation message", result.TerminationMsg)
+	if !strings.Contains(result.TerminationMsg, ValidatorContainerName) {
+		t.Errorf("TerminationMsg = %q, want message containing %q", result.TerminationMsg, ValidatorContainerName)
+	}
+	if !strings.Contains(result.TerminationMsg, "not found") {
+		t.Errorf("TerminationMsg = %q, want message containing 'not found'", result.TerminationMsg)
 	}
 	if result.CTRFStatus() != ctrf.StatusOther {
 		t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusOther)
@@ -452,7 +458,7 @@ func TestHandleTimeoutWithSidecar(t *testing.T) {
 				},
 			},
 			{
-				Name: "validator",
+				Name: ValidatorContainerName,
 				State: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode:   137,
@@ -495,8 +501,11 @@ func TestHandleTimeoutSidecarOnlyNoValidator(t *testing.T) {
 	if result.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
 	}
-	if !strings.Contains(result.TerminationMsg, "container 'validator' not found") {
-		t.Errorf("TerminationMsg = %q, want message about validator not found", result.TerminationMsg)
+	if !strings.Contains(result.TerminationMsg, ValidatorContainerName) {
+		t.Errorf("TerminationMsg = %q, want message containing %q", result.TerminationMsg, ValidatorContainerName)
+	}
+	if !strings.Contains(result.TerminationMsg, "not found") {
+		t.Errorf("TerminationMsg = %q, want message containing 'not found'", result.TerminationMsg)
 	}
 }
 
