@@ -59,6 +59,7 @@
 - *(evidence)* Fix a regression in cncf ai conformance evidence collection  by [@yuanchen8911](https://github.com/yuanchen8911)
 - *(ci)* Populate frozen version content in preview build and surface fern errors  by [@pdmack](https://github.com/pdmack)
 - *(validator)* Surface skip reason in CTRF, treat missing constraint as skip  by [@ayuskauskas](https://github.com/ayuskauskas)
+- *fix(bundler)* stratify helmfile bundle by DAG level by [@lockwobr](https://github.com/lockwobr)
 
 ### Other Tasks
 
