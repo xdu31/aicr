@@ -478,7 +478,24 @@ func EnsureDataConfigMaps(
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to create ConfigMap %s", cm.name), createErr)
 		}
 		if apierrors.IsAlreadyExists(createErr) {
-			_, updateErr := clientset.CoreV1().ConfigMaps(namespace).Update(ctx, configMap, metav1.UpdateOptions{})
+			// Fetch existing ConfigMap and mutate it in place to preserve metadata
+			existing, getErr := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, cm.name, metav1.GetOptions{})
+			if getErr != nil {
+				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to get ConfigMap %s", cm.name), getErr)
+			}
+			// Update labels in place
+			if existing.Labels == nil {
+				existing.Labels = map[string]string{}
+			}
+			existing.Labels[labels.Name] = labels.ValueAICR
+			existing.Labels[labels.Component] = labels.ValueValidation
+			existing.Labels[labels.ManagedBy] = labels.ValueAICR
+			existing.Labels[labels.RunID] = runID
+			// Update data
+			existing.Data = map[string]string{
+				cm.key: cm.data,
+			}
+			_, updateErr := clientset.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{})
 			if updateErr != nil {
 				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to update ConfigMap %s", cm.name), updateErr)
 			}

@@ -18,12 +18,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
 
 // buildEnv creates environment variables for the validator container
@@ -130,15 +132,29 @@ func buildVolumeMounts() []corev1.VolumeMount {
 func buildResources(entry ValidatorEntry) corev1.ResourceRequirements {
 	// Use catalog entry resources if specified, otherwise use defaults
 	if entry.Resources != nil && entry.Resources.CPU != "" && entry.Resources.Memory != "" {
-		return corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(entry.Resources.CPU),
-				corev1.ResourceMemory: resource.MustParse(entry.Resources.Memory),
-			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(entry.Resources.CPU),
-				corev1.ResourceMemory: resource.MustParse(entry.Resources.Memory),
-			},
+		// Parse user-provided quantities with error handling
+		cpu, cpuErr := resource.ParseQuantity(entry.Resources.CPU)
+		memory, memErr := resource.ParseQuantity(entry.Resources.Memory)
+
+		// If parsing fails, fall back to defaults
+		if cpuErr != nil || memErr != nil {
+			slog.Warn("invalid resource quantities in catalog entry, using defaults",
+				"validator", entry.Name,
+				"cpu", entry.Resources.CPU,
+				"cpuError", cpuErr,
+				"memory", entry.Resources.Memory,
+				"memoryError", memErr)
+		} else {
+			return corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    cpu,
+					corev1.ResourceMemory: memory,
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    cpu,
+					corev1.ResourceMemory: memory,
+				},
+			}
 		}
 	}
 
@@ -239,4 +255,113 @@ func generateJobName(validatorName string) string {
 		return fmt.Sprintf("aicr-%s-%d", validatorName, time.Now().Unix())
 	}
 	return fmt.Sprintf("aicr-%s-%s", validatorName, hex.EncodeToString(suffix))
+}
+
+// buildEnvVarApply builds environment variable apply configurations from a list of EnvVars.
+// Handles all four ValueFrom source types: FieldRef, SecretKeyRef, ConfigMapKeyRef, ResourceFieldRef.
+func buildEnvVarApply(envVars []corev1.EnvVar) []*applycorev1.EnvVarApplyConfiguration {
+	envApply := make([]*applycorev1.EnvVarApplyConfiguration, 0, len(envVars))
+	for _, e := range envVars {
+		if e.ValueFrom != nil {
+			// Handle all four ValueFrom source types
+			envVarSource := applycorev1.EnvVarSource()
+			switch {
+			case e.ValueFrom.FieldRef != nil:
+				envVarSource = envVarSource.WithFieldRef(applycorev1.ObjectFieldSelector().
+					WithFieldPath(e.ValueFrom.FieldRef.FieldPath))
+			case e.ValueFrom.SecretKeyRef != nil:
+				envVarSource = envVarSource.WithSecretKeyRef(applycorev1.SecretKeySelector().
+					WithName(e.ValueFrom.SecretKeyRef.Name).
+					WithKey(e.ValueFrom.SecretKeyRef.Key))
+			case e.ValueFrom.ConfigMapKeyRef != nil:
+				envVarSource = envVarSource.WithConfigMapKeyRef(applycorev1.ConfigMapKeySelector().
+					WithName(e.ValueFrom.ConfigMapKeyRef.Name).
+					WithKey(e.ValueFrom.ConfigMapKeyRef.Key))
+			case e.ValueFrom.ResourceFieldRef != nil:
+				envVarSource = envVarSource.WithResourceFieldRef(applycorev1.ResourceFieldSelector().
+					WithContainerName(e.ValueFrom.ResourceFieldRef.ContainerName).
+					WithResource(e.ValueFrom.ResourceFieldRef.Resource))
+			}
+			envApply = append(envApply, applycorev1.EnvVar().
+				WithName(e.Name).
+				WithValueFrom(envVarSource))
+		} else {
+			envApply = append(envApply, applycorev1.EnvVar().
+				WithName(e.Name).
+				WithValue(e.Value))
+		}
+	}
+	return envApply
+}
+
+// buildVolumesApply builds volume apply configurations from a list of Volumes.
+// Handles all volume source types: ConfigMap, Secret, EmptyDir, HostPath, PVC, Projected, DownwardAPI.
+func buildVolumesApply(volumes []corev1.Volume) []*applycorev1.VolumeApplyConfiguration {
+	volumesApply := make([]*applycorev1.VolumeApplyConfiguration, 0, len(volumes))
+	for _, v := range volumes {
+		volApply := applycorev1.Volume().WithName(v.Name)
+
+		// Handle all volume source types
+		switch {
+		case v.ConfigMap != nil:
+			volApply = volApply.WithConfigMap(applycorev1.ConfigMapVolumeSource().
+				WithName(v.ConfigMap.Name))
+		case v.Secret != nil:
+			volApply = volApply.WithSecret(applycorev1.SecretVolumeSource().
+				WithSecretName(v.Secret.SecretName))
+		case v.EmptyDir != nil:
+			emptyDir := applycorev1.EmptyDirVolumeSource()
+			if v.EmptyDir.Medium != "" {
+				emptyDir = emptyDir.WithMedium(v.EmptyDir.Medium)
+			}
+			if v.EmptyDir.SizeLimit != nil && !v.EmptyDir.SizeLimit.IsZero() {
+				emptyDir = emptyDir.WithSizeLimit(*v.EmptyDir.SizeLimit)
+			}
+			volApply = volApply.WithEmptyDir(emptyDir)
+		case v.HostPath != nil:
+			hostPath := applycorev1.HostPathVolumeSource().
+				WithPath(v.HostPath.Path)
+			if v.HostPath.Type != nil {
+				hostPath = hostPath.WithType(*v.HostPath.Type)
+			}
+			volApply = volApply.WithHostPath(hostPath)
+		case v.PersistentVolumeClaim != nil:
+			volApply = volApply.WithPersistentVolumeClaim(applycorev1.PersistentVolumeClaimVolumeSource().
+				WithClaimName(v.PersistentVolumeClaim.ClaimName))
+		case v.Projected != nil:
+			projected := applycorev1.ProjectedVolumeSource()
+			if v.Projected.DefaultMode != nil {
+				projected = projected.WithDefaultMode(*v.Projected.DefaultMode)
+			}
+			sources := make([]*applycorev1.VolumeProjectionApplyConfiguration, 0, len(v.Projected.Sources))
+			for _, src := range v.Projected.Sources {
+				source := applycorev1.VolumeProjection()
+				switch {
+				case src.ConfigMap != nil:
+					source = source.WithConfigMap(applycorev1.ConfigMapProjection().
+						WithName(src.ConfigMap.Name))
+				case src.Secret != nil:
+					source = source.WithSecret(applycorev1.SecretProjection().
+						WithName(src.Secret.Name))
+				case src.DownwardAPI != nil:
+					source = source.WithDownwardAPI(applycorev1.DownwardAPIProjection())
+				case src.ServiceAccountToken != nil:
+					source = source.WithServiceAccountToken(applycorev1.ServiceAccountTokenProjection().
+						WithPath(src.ServiceAccountToken.Path))
+				}
+				sources = append(sources, source)
+			}
+			projected = projected.WithSources(sources...)
+			volApply = volApply.WithProjected(projected)
+		case v.DownwardAPI != nil:
+			downwardAPI := applycorev1.DownwardAPIVolumeSource()
+			if v.DownwardAPI.DefaultMode != nil {
+				downwardAPI = downwardAPI.WithDefaultMode(*v.DownwardAPI.DefaultMode)
+			}
+			volApply = volApply.WithDownwardAPI(downwardAPI)
+		}
+
+		volumesApply = append(volumesApply, volApply)
+	}
+	return volumesApply
 }

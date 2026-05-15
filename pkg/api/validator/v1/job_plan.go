@@ -74,8 +74,8 @@ type JobPlan struct {
 	// Tolerations are pod tolerations for scheduling
 	Tolerations []corev1.Toleration
 
-	// ImagePullSecret is the secret name for pulling images (empty = no secret)
-	ImagePullSecret string
+	// ImagePullSecrets are secret names for pulling images (empty = no secrets)
+	ImagePullSecrets []string
 
 	// Labels are labels to apply to the Job and Pod
 	Labels map[string]string
@@ -130,12 +130,17 @@ func Plan(
 	version string,
 	commit string,
 	serviceAccount string,
-	imagePullSecret string,
+	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
 	nodeSelector map[string]string,
 ) []JobPlan {
 
 	var plans []JobPlan
+
+	// Guard against nil catalog
+	if cat == nil {
+		return plans
+	}
 
 	// Iterate through all phases
 	phases := []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
@@ -149,7 +154,7 @@ func Plan(
 		// Create a plan for each entry
 		for _, entry := range entries {
 			plan := BuildJobPlan(entry, runID, namespace, version, commit,
-				serviceAccount, imagePullSecret, tolerations, nodeSelector)
+				serviceAccount, imagePullSecrets, tolerations, nodeSelector)
 			plans = append(plans, plan)
 		}
 	}
@@ -166,7 +171,7 @@ func BuildJobPlan(
 	version string,
 	commit string,
 	serviceAccount string,
-	imagePullSecret string,
+	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
 	nodeSelector map[string]string,
 ) JobPlan {
@@ -200,21 +205,21 @@ func BuildJobPlan(
 	}
 
 	return JobPlan{
-		ValidatorName:   entry.Name,
-		Phase:           entry.Phase,
-		JobName:         generateJobName(entry.Name),
-		Namespace:       namespace,
-		Image:           entry.Image,
-		Args:            entry.Args,
-		Env:             env,
-		Volumes:         volumes,
-		VolumeMounts:    volumeMounts,
-		Resources:       resources,
-		Timeout:         int64(timeout.Seconds()),
-		ServiceAccount:  serviceAccount,
-		Tolerations:     []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-		ImagePullSecret: imagePullSecret,
-		Labels:          jobLabels,
+		ValidatorName:    entry.Name,
+		Phase:            entry.Phase,
+		JobName:          generateJobName(entry.Name),
+		Namespace:        namespace,
+		Image:            entry.Image,
+		Args:             entry.Args,
+		Env:              env,
+		Volumes:          volumes,
+		VolumeMounts:     volumeMounts,
+		Resources:        resources,
+		Timeout:          int64(timeout.Seconds()),
+		ServiceAccount:   serviceAccount,
+		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+		ImagePullSecrets: imagePullSecrets,
+		Labels:           jobLabels,
 	}
 }
 
@@ -222,11 +227,9 @@ func BuildJobPlan(
 // The returned Job spec matches exactly what the current deployer produces.
 func RenderPlan(plan JobPlan) *batchv1.Job {
 	// Build image pull secrets
-	var imagePullSecrets []corev1.LocalObjectReference
-	if plan.ImagePullSecret != "" {
-		imagePullSecrets = []corev1.LocalObjectReference{
-			{Name: plan.ImagePullSecret},
-		}
+	imagePullSecrets := make([]corev1.LocalObjectReference, 0, len(plan.ImagePullSecrets))
+	for _, secret := range plan.ImagePullSecrets {
+		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: secret})
 	}
 
 	// Determine image pull policy
@@ -287,31 +290,17 @@ func RenderPlan(plan JobPlan) *batchv1.Job {
 // This allows controllers to use deterministic names for idempotent re-runs.
 func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobApplyConfiguration {
 	// Build image pull secrets
-	var imagePullSecrets []*applycorev1.LocalObjectReferenceApplyConfiguration
-	if plan.ImagePullSecret != "" {
-		imagePullSecrets = []*applycorev1.LocalObjectReferenceApplyConfiguration{
-			applycorev1.LocalObjectReference().WithName(plan.ImagePullSecret),
-		}
+	imagePullSecrets := make([]*applycorev1.LocalObjectReferenceApplyConfiguration, 0, len(plan.ImagePullSecrets))
+	for _, secret := range plan.ImagePullSecrets {
+		imagePullSecrets = append(imagePullSecrets,
+			applycorev1.LocalObjectReference().WithName(secret))
 	}
 
 	// Determine image pull policy
 	pullPolicy := ImagePullPolicy(plan.Image)
 
 	// Build environment variables
-	envApply := make([]*applycorev1.EnvVarApplyConfiguration, 0, len(plan.Env))
-	for _, e := range plan.Env {
-		if e.ValueFrom != nil {
-			envApply = append(envApply, applycorev1.EnvVar().
-				WithName(e.Name).
-				WithValueFrom(applycorev1.EnvVarSource().
-					WithFieldRef(applycorev1.ObjectFieldSelector().
-						WithFieldPath(e.ValueFrom.FieldRef.FieldPath))))
-		} else {
-			envApply = append(envApply, applycorev1.EnvVar().
-				WithName(e.Name).
-				WithValue(e.Value))
-		}
-	}
+	envApply := buildEnvVarApply(plan.Env)
 
 	// Build volume mounts
 	volumeMountsApply := make([]*applycorev1.VolumeMountApplyConfiguration, 0, len(plan.VolumeMounts))
@@ -323,15 +312,7 @@ func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobAppl
 	}
 
 	// Build volumes
-	volumesApply := make([]*applycorev1.VolumeApplyConfiguration, 0, len(plan.Volumes))
-	for _, v := range plan.Volumes {
-		if v.ConfigMap != nil {
-			volumesApply = append(volumesApply, applycorev1.Volume().
-				WithName(v.Name).
-				WithConfigMap(applycorev1.ConfigMapVolumeSource().
-					WithName(v.ConfigMap.Name)))
-		}
-	}
+	volumesApply := buildVolumesApply(plan.Volumes)
 
 	// Build resources
 	resourcesApply := applycorev1.ResourceRequirements()

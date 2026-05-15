@@ -175,7 +175,7 @@ func TestBuildJobPlan(t *testing.T) {
 		"1.0.0",
 		"abc123",
 		"test-sa",
-		"my-secret",
+		[]string{"my-secret"},
 		tolerations,
 		nodeSelector,
 	)
@@ -193,8 +193,8 @@ func TestBuildJobPlan(t *testing.T) {
 	if plan.ServiceAccount != "test-sa" {
 		t.Errorf("ServiceAccount = %q, want test-sa", plan.ServiceAccount)
 	}
-	if plan.ImagePullSecret != "my-secret" {
-		t.Errorf("ImagePullSecret = %q, want my-secret", plan.ImagePullSecret)
+	if len(plan.ImagePullSecrets) != 1 || plan.ImagePullSecrets[0] != "my-secret" {
+		t.Errorf("ImagePullSecrets = %v, want [my-secret]", plan.ImagePullSecrets)
 	}
 
 	// Verify JobName is generated
@@ -290,7 +290,7 @@ func TestBuildJobPlanWithDefaults(t *testing.T) {
 		Image: "minimal-image:latest",
 	}
 
-	plan := BuildJobPlan(entry, "run-456", "ns", "", "", "sa", "", nil, nil)
+	plan := BuildJobPlan(entry, "run-456", "ns", "", "", "sa", nil, nil, nil)
 
 	// Should have default resources (buildResources default path)
 	if plan.Resources.Requests.Cpu().Cmp(resource.MustParse("1")) != 0 {
@@ -317,21 +317,21 @@ func TestBuildJobPlanWithDefaults(t *testing.T) {
 
 func TestRenderPlan(t *testing.T) {
 	plan := JobPlan{
-		ValidatorName:   "test-validator",
-		Phase:           "deployment",
-		JobName:         "test-job-abc123",
-		Namespace:       "test-ns",
-		Image:           "test-image:v1.0.0",
-		Args:            []string{"--test"},
-		Env:             []corev1.EnvVar{{Name: "TEST", Value: "value"}},
-		Volumes:         []corev1.Volume{{Name: "snapshot"}},
-		VolumeMounts:    []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
-		Resources:       corev1.ResourceRequirements{},
-		Timeout:         300,
-		ServiceAccount:  "test-sa",
-		Tolerations:     []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-		ImagePullSecret: "my-secret",
-		Labels:          map[string]string{"test": "label"},
+		ValidatorName:    "test-validator",
+		Phase:            "deployment",
+		JobName:          "test-job-abc123",
+		Namespace:        "test-ns",
+		Image:            "test-image:v1.0.0",
+		Args:             []string{"--test"},
+		Env:              []corev1.EnvVar{{Name: "TEST", Value: "value"}},
+		Volumes:          []corev1.Volume{{Name: "snapshot"}},
+		VolumeMounts:     []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
+		Resources:        corev1.ResourceRequirements{},
+		Timeout:          300,
+		ServiceAccount:   "test-sa",
+		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+		ImagePullSecrets: []string{"my-secret"},
+		Labels:           map[string]string{"test": "label"},
 	}
 
 	job := RenderPlan(plan)
@@ -393,21 +393,21 @@ func TestRenderPlan(t *testing.T) {
 
 func TestRenderPlanToApplyConfig(t *testing.T) {
 	plan := JobPlan{
-		ValidatorName:   "test-validator",
-		Phase:           "deployment",
-		JobName:         "test-job-xyz789",
-		Namespace:       "apply-ns",
-		Image:           "test-image:v2.0.0",
-		Args:            []string{"--apply-test"},
-		Env:             []corev1.EnvVar{{Name: "TEST", Value: "apply-value"}},
-		Volumes:         []corev1.Volume{{Name: "snapshot"}},
-		VolumeMounts:    []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
-		Resources:       corev1.ResourceRequirements{},
-		Timeout:         600,
-		ServiceAccount:  "apply-sa",
-		Tolerations:     []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-		ImagePullSecret: "apply-secret",
-		Labels:          map[string]string{"apply": "test"},
+		ValidatorName:    "test-validator",
+		Phase:            "deployment",
+		JobName:          "test-job-xyz789",
+		Namespace:        "apply-ns",
+		Image:            "test-image:v2.0.0",
+		Args:             []string{"--apply-test"},
+		Env:              []corev1.EnvVar{{Name: "TEST", Value: "apply-value"}},
+		Volumes:          []corev1.Volume{{Name: "snapshot"}},
+		VolumeMounts:     []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
+		Resources:        corev1.ResourceRequirements{},
+		Timeout:          600,
+		ServiceAccount:   "apply-sa",
+		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+		ImagePullSecrets: []string{"apply-secret"},
+		Labels:           map[string]string{"apply": "test"},
 	}
 
 	jobApply := RenderPlanToApplyConfig(plan, "apply-job-name")
@@ -432,6 +432,142 @@ func TestRenderPlanToApplyConfig(t *testing.T) {
 	}
 	if *jobApply.Spec.BackoffLimit != 0 {
 		t.Errorf("BackoffLimit = %d, want 0", *jobApply.Spec.BackoffLimit)
+	}
+}
+
+func TestRenderPlanToApplyConfig_EnvAndVolumeTypes(t *testing.T) {
+	// Test plan with various env var sources and volume types
+	plan := JobPlan{
+		ValidatorName: "test-validator",
+		Phase:         "deployment",
+		JobName:       "test-job",
+		Namespace:     "test-ns",
+		Image:         "test:latest",
+		Env: []corev1.EnvVar{
+			{Name: "PLAIN", Value: "value"},
+			{Name: "FROM_FIELD", ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
+			}},
+			{Name: "FROM_SECRET", ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "my-secret"},
+					Key:                  "password",
+				},
+			}},
+			{Name: "FROM_CONFIGMAP", ValueFrom: &corev1.EnvVarSource{
+				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "my-config"},
+					Key:                  "config.yaml",
+				},
+			}},
+			{Name: "FROM_RESOURCE", ValueFrom: &corev1.EnvVarSource{
+				ResourceFieldRef: &corev1.ResourceFieldSelector{
+					ContainerName: "validator",
+					Resource:      "limits.memory",
+				},
+			}},
+		},
+		Volumes: []corev1.Volume{
+			{
+				Name: "configmap-vol",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "cm"},
+					},
+				},
+			},
+			{
+				Name: "secret-vol",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{SecretName: "secret"},
+				},
+			},
+			{
+				Name: "emptydir-vol",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
+			{
+				Name: "hostpath-vol",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{Path: "/host/path"},
+				},
+			},
+			{
+				Name: "pvc-vol",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc"},
+				},
+			},
+		},
+		VolumeMounts:     []corev1.VolumeMount{{Name: "configmap-vol", MountPath: "/data"}},
+		Resources:        corev1.ResourceRequirements{},
+		Timeout:          300,
+		ServiceAccount:   "sa",
+		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+		ImagePullSecrets: []string{"secret"},
+		Labels:           map[string]string{"test": "true"},
+	}
+
+	jobApply := RenderPlanToApplyConfig(plan, "test-job")
+
+	if jobApply == nil {
+		t.Fatal("RenderPlanToApplyConfig returned nil")
+	}
+
+	// Verify env vars are present
+	podSpec := jobApply.Spec.Template.Spec
+	if podSpec == nil {
+		t.Fatal("PodSpec is nil")
+	}
+	if len(podSpec.Containers) == 0 {
+		t.Fatal("No containers in pod spec")
+	}
+	container := podSpec.Containers[0]
+	if len(container.Env) != 5 {
+		t.Errorf("Expected 5 env vars, got %d", len(container.Env))
+	}
+
+	// Verify all env var types are handled
+	envMap := make(map[string]*string)
+	for _, env := range container.Env {
+		if env.Name != nil {
+			envMap[*env.Name] = env.Value
+		}
+	}
+	if _, ok := envMap["PLAIN"]; !ok {
+		t.Error("Plain value env var not found")
+	}
+	if _, ok := envMap["FROM_FIELD"]; !ok {
+		t.Error("FieldRef env var not found")
+	}
+	if _, ok := envMap["FROM_SECRET"]; !ok {
+		t.Error("SecretKeyRef env var not found")
+	}
+	if _, ok := envMap["FROM_CONFIGMAP"]; !ok {
+		t.Error("ConfigMapKeyRef env var not found")
+	}
+	if _, ok := envMap["FROM_RESOURCE"]; !ok {
+		t.Error("ResourceFieldRef env var not found")
+	}
+
+	// Verify all volume types are handled
+	if len(podSpec.Volumes) != 5 {
+		t.Errorf("Expected 5 volumes, got %d", len(podSpec.Volumes))
+	}
+
+	volumeMap := make(map[string]bool)
+	for _, vol := range podSpec.Volumes {
+		if vol.Name != nil {
+			volumeMap[*vol.Name] = true
+		}
+	}
+	expectedVolumes := []string{"configmap-vol", "secret-vol", "emptydir-vol", "hostpath-vol", "pvc-vol"}
+	for _, name := range expectedVolumes {
+		if !volumeMap[name] {
+			t.Errorf("Volume %s not found in rendered spec", name)
+		}
 	}
 }
 
@@ -467,7 +603,7 @@ func TestPlan(t *testing.T) {
 
 	// Generate plans
 	plans := Plan(cat, validationInput, "test-run-123", "test-ns", "1.0.0", "abc123",
-		"test-service-account", "my-secret", nil, nil)
+		"test-service-account", []string{"my-secret"}, nil, nil)
 
 	// Should have exactly one plan for deployment phase (operator-health)
 	if len(plans) != 1 {
@@ -521,7 +657,7 @@ func TestPlanMultiplePhases(t *testing.T) {
 		},
 	}
 
-	plans := Plan(cat, validationInput, "run-1", "ns", "1.0", "abc", "sa", "", nil, nil)
+	plans := Plan(cat, validationInput, "run-1", "ns", "1.0", "abc", "sa", nil, nil, nil)
 
 	// Should have 3 plans total (2 deployment + 1 performance)
 	if len(plans) != 3 {
