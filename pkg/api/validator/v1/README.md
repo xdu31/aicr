@@ -72,7 +72,7 @@ plans := v1.Plan(
     "1.0.0",        // Your controller version
     "abc123",       // Your controller commit
     serviceAccount, // ServiceAccount name
-    "",             // imagePullSecret (empty if not needed)
+    nil,            // imagePullSecrets (empty slice if not needed)
     nil,            // tolerations
     nil,            // nodeSelector
 )
@@ -131,20 +131,20 @@ The `JobPlan` struct contains all components needed to build a validator Job:
 
 ```go
 type JobPlan struct {
-    ValidatorName   string                      // Unique validator identifier
-    Phase           string                      // "deployment", "performance", or "conformance"
-    JobName         string                      // Pre-generated unique Job name
-    Image           string                      // Validator container image
-    Args            []string                    // Container arguments
-    Env             []corev1.EnvVar             // Environment variables
-    Volumes         []corev1.Volume             // Pod volumes (ConfigMaps)
-    VolumeMounts    []corev1.VolumeMount        // Container volume mounts
-    Resources       corev1.ResourceRequirements // CPU/memory requests and limits
-    Timeout         int64                       // Max execution time (seconds)
-    ServiceAccount  string                      // Kubernetes ServiceAccount
-    Tolerations     []corev1.Toleration         // Pod tolerations
-    ImagePullSecret string                      // Image pull secret name
-    Labels          map[string]string           // Job and Pod labels
+    ValidatorName    string                      // Unique validator identifier
+    Phase            string                      // "deployment", "performance", or "conformance"
+    JobName          string                      // Pre-generated unique Job name
+    Image            string                      // Validator container image
+    Args             []string                    // Container arguments
+    Env              []corev1.EnvVar             // Environment variables
+    Volumes          []corev1.Volume             // Pod volumes (ConfigMaps)
+    VolumeMounts     []corev1.VolumeMount        // Container volume mounts
+    Resources        corev1.ResourceRequirements // CPU/memory requests and limits
+    Timeout          int64                       // Max execution time (seconds)
+    ServiceAccount   string                      // Kubernetes ServiceAccount
+    Tolerations      []corev1.Toleration         // Pod tolerations
+    ImagePullSecrets []string                    // Image pull secret names
+    Labels           map[string]string           // Job and Pod labels
 }
 ```
 
@@ -187,7 +187,7 @@ plan := v1.BuildJobPlan(
     "1.0.0",
     "abc123",
     serviceAccount,
-    "",             // imagePullSecret
+    nil,            // imagePullSecrets
     tolerations,
     nodeSelector,
 )
@@ -263,7 +263,7 @@ func RunValidation(
         "1.0.0",       // version
         "abc123",      // commit
         serviceAccount,
-        "",            // imagePullSecret
+        nil,           // imagePullSecrets
         nil,           // tolerations
         nil,           // nodeSelector
     )
@@ -301,7 +301,7 @@ Format: `{timestamp}-{random-hex}` (e.g., "20260514-123045-abc123def456")
 
 ### Job Planning
 
-**`Plan(cat, validationInput, runID, namespace, version, commit, serviceAccount, imagePullSecret, tolerations, nodeSelector) []JobPlan`**
+**`Plan(cat, validationInput, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector) []JobPlan`**
 Generates JobPlans for all validators across all phases matching the ValidationInput filters.
 
 **Parameters:**
@@ -312,19 +312,19 @@ Generates JobPlans for all validators across all phases matching the ValidationI
 - `version` - Controller version (forwarded to validators)
 - `commit` - Controller commit SHA (forwarded to validators)
 - `serviceAccount` - ServiceAccount name for Jobs (use your own naming strategy)
-- `imagePullSecret` - Image pull secret name (empty if not needed)
+- `imagePullSecrets` - Image pull secret names (empty slice if not needed)
 - `tolerations` - Pod tolerations (forwarded to inner workloads)
 - `nodeSelector` - Node selector (forwarded to inner workloads)
 
-**`BuildJobPlan(entry, runID, namespace, version, commit, serviceAccount, imagePullSecret, tolerations, nodeSelector) JobPlan`**
+**`BuildJobPlan(entry, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector) JobPlan`**
 Builds a JobPlan from a single validator catalog entry. Used for custom scenarios.
 
 ### Job Rendering
 
-**`RenderPlan(plan JobPlan, namespace string) *batchv1.Job`**
-Renders a complete Kubernetes Job from a JobPlan. Uses `plan.JobName` for the Job name.
+**`RenderPlan(plan JobPlan) *batchv1.Job`**
+Renders a complete Kubernetes Job from a JobPlan. Uses `plan.JobName` for the Job name and `plan.Namespace` for the namespace.
 
-**`RenderPlanToApplyConfig(plan JobPlan, namespace, jobName string) *applybatchv1.JobApplyConfiguration`**
+**`RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobApplyConfiguration`**
 Renders a Kubernetes Job ApplyConfiguration from a JobPlan for server-side apply.
 Typically called with `plan.JobName` as the jobName parameter.
 

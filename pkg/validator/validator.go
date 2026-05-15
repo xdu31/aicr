@@ -16,8 +16,6 @@ package validator
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
