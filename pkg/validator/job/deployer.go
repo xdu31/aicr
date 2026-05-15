@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -90,11 +91,6 @@ func (d *Deployer) JobName() string {
 // A unique name is generated and the Job is applied with the aicr-validator field manager.
 func (d *Deployer) DeployJob(ctx context.Context) error {
 	// Build JobPlan from deployer configuration
-	imagePullSecret := ""
-	if len(d.imagePullSecrets) > 0 {
-		imagePullSecret = d.imagePullSecrets[0]
-	}
-
 	plan := v1.BuildJobPlan(
 		d.entry,
 		d.runID,
@@ -102,7 +98,7 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 		d.cliVersion,
 		d.cliCommit,
 		ServiceAccountName(d.runID),
-		imagePullSecret,
+		d.imagePullSecrets,
 		d.tolerations,
 		d.nodeSelector,
 	)
@@ -115,7 +111,7 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 
 	// Apply the Job with server-side apply
 	applied, err := d.clientset.BatchV1().Jobs(d.namespace).Apply(
-		ctx, jobApply, metav1.ApplyOptions{FieldManager: "aicr-validator", Force: true})
+		ctx, jobApply, metav1.ApplyOptions{FieldManager: labels.ValueAICR, Force: true})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to apply Job %s", plan.JobName), err)

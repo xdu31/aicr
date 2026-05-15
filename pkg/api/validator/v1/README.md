@@ -88,7 +88,7 @@ for _, plan := range plans {
     fmt.Printf("Creating Job: %s\n", plan.JobName)
 
     // Render to regular Job
-    jobObj := v1.RenderPlan(plan, namespace)
+    jobObj := v1.RenderPlan(plan)
 
     // Create the Job
     created, err := clientset.BatchV1().Jobs(namespace).Create(
@@ -110,7 +110,7 @@ for _, plan := range plans {
     fmt.Printf("Applying Job: %s\n", plan.JobName)
 
     // Render to ApplyConfiguration
-    jobApply := v1.RenderPlanToApplyConfig(plan, namespace, plan.JobName)
+    jobApply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
 
     // Apply the Job (idempotent)
     created, err := clientset.BatchV1().Jobs(namespace).Apply(
@@ -163,13 +163,13 @@ for _, plan := range plans {
 
 // Run deployment phase first
 for _, plan := range phaseGroups["deployment"] {
-    jobObj := v1.RenderPlan(plan, namespace)
+    jobObj := v1.RenderPlan(plan)
     // Deploy job...
 }
 
 // Then performance phase
 for _, plan := range phaseGroups["performance"] {
-    jobObj := v1.RenderPlan(plan, namespace)
+    jobObj := v1.RenderPlan(plan)
     // Deploy job...
 }
 ```
@@ -200,7 +200,7 @@ plan.Env = append(plan.Env, corev1.EnvVar{
 })
 
 // Render with customizations
-jobObj := v1.RenderPlan(plan, namespace)
+jobObj := v1.RenderPlan(plan)
 ```
 
 ## When to Use Which API
@@ -273,7 +273,7 @@ func RunValidation(
         fmt.Printf("Deploying validator: %s (Job: %s)\n",
             plan.ValidatorName, plan.JobName)
 
-        jobApply := v1.RenderPlanToApplyConfig(plan, namespace, plan.JobName)
+        jobApply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
 
         _, err := clientset.BatchV1().Jobs(namespace).Apply(
             ctx, jobApply, metav1.ApplyOptions{
