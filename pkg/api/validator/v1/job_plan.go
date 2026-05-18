@@ -85,11 +85,19 @@ type JobPlan struct {
 // Format: {timestamp}-{random-hex} (e.g., "20260514-123045-abc123def456").
 // External controllers should use this to generate runIDs before creating
 // ConfigMaps and rendering Jobs.
+//
+// Panics if the system's random number generator fails. Entropy failures are
+// exceptional and we prefer to fail fast rather than generate predictable IDs
+// that could collide across concurrent runs.
 func GenerateRunID() string {
 	timestamp := time.Now().Format("20060102-150405")
 	randomBytes := make([]byte, 8)
-	if n, err := rand.Read(randomBytes); err != nil || n != len(randomBytes) {
-		return timestamp
+	n, err := rand.Read(randomBytes)
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate random bytes for runID: %v", err))
+	}
+	if n != len(randomBytes) {
+		panic(fmt.Sprintf("failed to generate runID: read %d bytes, expected %d", n, len(randomBytes)))
 	}
 	return fmt.Sprintf("%s-%s", timestamp, hex.EncodeToString(randomBytes))
 }

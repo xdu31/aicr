@@ -436,11 +436,8 @@ func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, rea
 // EnsureDataConfigMaps creates or updates snapshot and validation ConfigMaps.
 // Creates ConfigMaps named aicr-snapshot-{runID} and aicr-validation-{runID} with
 // create-or-update semantics. External controllers should call this after generating
-// a runID and before rendering validator Jobs.
-
-// EnsureDataConfigMaps creates or updates ConfigMaps for snapshot and validation data.
-// External controllers must call this before deploying validator Jobs, as the Jobs
-// mount these ConfigMaps at /data/snapshot and /data/validation.
+// a runID and before rendering validator Jobs. The Jobs mount these ConfigMaps at
+// /data/snapshot and /data/validation.
 func EnsureDataConfigMaps(
 	ctx context.Context,
 	clientset kubernetes.Interface,
