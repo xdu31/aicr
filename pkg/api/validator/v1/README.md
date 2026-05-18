@@ -142,7 +142,7 @@ type JobPlan struct {
     Resources        corev1.ResourceRequirements // CPU/memory requests and limits
     Timeout          int64                       // Max execution time (seconds)
     ServiceAccount   string                      // Kubernetes ServiceAccount
-    Tolerations      []corev1.Toleration         // Pod tolerations
+    Tolerations      []corev1.Toleration         // Inner workload tolerations (forwarded via env; validator Pod uses tolerate-all)
     ImagePullSecrets []string                    // Image pull secret names
     Labels           map[string]string           // Job and Pod labels
 }
@@ -313,8 +313,8 @@ Generates JobPlans for all validators across all phases matching the ValidationI
 - `commit` - Controller commit SHA (forwarded to validators)
 - `serviceAccount` - ServiceAccount name for Jobs (use your own naming strategy)
 - `imagePullSecrets` - Image pull secret names (empty slice if not needed)
-- `tolerations` - Pod tolerations (forwarded to inner workloads)
-- `nodeSelector` - Node selector (forwarded to inner workloads)
+- `tolerations` - Tolerations for inner workloads (forwarded via `AICR_TOLERATIONS` env var; validator Pod uses tolerate-all)
+- `nodeSelector` - Node selector for inner workloads (forwarded via `AICR_NODE_SELECTOR` env var; validator Pod has no node selector)
 
 **`BuildJobPlan(entry, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector) JobPlan`**
 Builds a JobPlan from a single validator catalog entry. Used for custom scenarios.
