@@ -19,7 +19,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -39,6 +38,8 @@ func buildEnv(
 	timeout time.Duration,
 	nodeSelector map[string]string,
 	tolerations []corev1.Toleration,
+	imageRegistryOverride string,
+	imageTagOverride string,
 ) []corev1.EnvVar {
 
 	env := []corev1.EnvVar{
@@ -80,12 +81,12 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: "AICR_CLI_COMMIT", Value: commit})
 	}
 
-	// Add image registry/tag overrides from environment
-	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
-		env = append(env, corev1.EnvVar{Name: "AICR_VALIDATOR_IMAGE_REGISTRY", Value: override})
+	// Add image registry/tag overrides
+	if imageRegistryOverride != "" {
+		env = append(env, corev1.EnvVar{Name: "AICR_VALIDATOR_IMAGE_REGISTRY", Value: imageRegistryOverride})
 	}
-	if tag := os.Getenv("AICR_VALIDATOR_IMAGE_TAG"); tag != "" {
-		env = append(env, corev1.EnvVar{Name: "AICR_VALIDATOR_IMAGE_TAG", Value: tag})
+	if imageTagOverride != "" {
+		env = append(env, corev1.EnvVar{Name: "AICR_VALIDATOR_IMAGE_TAG", Value: imageTagOverride})
 	}
 
 	// Add catalog entry's custom env vars

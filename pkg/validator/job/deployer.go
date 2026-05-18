@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
@@ -101,6 +102,8 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 		d.imagePullSecrets,
 		d.tolerations,
 		d.nodeSelector,
+		os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"),
+		os.Getenv("AICR_VALIDATOR_IMAGE_TAG"),
 	)
 
 	// Use the job name from the plan

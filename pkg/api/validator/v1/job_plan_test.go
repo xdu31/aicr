@@ -140,9 +140,8 @@ func TestImagePullPolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
-			if got := ImagePullPolicy(tt.image); got != tt.want {
-				t.Errorf("ImagePullPolicy(%q) = %q, want %q", tt.image, got, tt.want)
+			if got := ImagePullPolicy(tt.image, tt.envTag); got != tt.want {
+				t.Errorf("ImagePullPolicy(%q, %q) = %q, want %q", tt.image, tt.envTag, got, tt.want)
 			}
 		})
 	}
@@ -178,6 +177,8 @@ func TestBuildJobPlan(t *testing.T) {
 		[]string{"my-secret"},
 		tolerations,
 		nodeSelector,
+		"", // imageRegistryOverride
+		"", // imageTagOverride
 	)
 
 	// Verify basic fields
@@ -290,7 +291,7 @@ func TestBuildJobPlanWithDefaults(t *testing.T) {
 		Image: "minimal-image:latest",
 	}
 
-	plan := BuildJobPlan(entry, "run-456", "ns", "", "", "sa", nil, nil, nil)
+	plan := BuildJobPlan(entry, "run-456", "ns", "", "", "sa", nil, nil, nil, "", "")
 
 	// Should have default resources (buildResources default path)
 	if plan.Resources.Requests.Cpu().Cmp(resource.MustParse("1")) != 0 {
@@ -603,7 +604,7 @@ func TestPlan(t *testing.T) {
 
 	// Generate plans
 	plans := Plan(cat, validationInput, "test-run-123", "test-ns", "1.0.0", "abc123",
-		"test-service-account", []string{"my-secret"}, nil, nil)
+		"test-service-account", []string{"my-secret"}, nil, nil, "", "")
 
 	// Should have exactly one plan for deployment phase (operator-health)
 	if len(plans) != 1 {
@@ -657,7 +658,7 @@ func TestPlanMultiplePhases(t *testing.T) {
 		},
 	}
 
-	plans := Plan(cat, validationInput, "run-1", "ns", "1.0", "abc", "sa", nil, nil, nil)
+	plans := Plan(cat, validationInput, "run-1", "ns", "1.0", "abc", "sa", nil, nil, nil, "", "")
 
 	// Should have 3 plans total (2 deployment + 1 performance)
 	if len(plans) != 3 {

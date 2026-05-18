@@ -1230,7 +1230,7 @@ echo '%s'`,
 							// only for :latest), which is insufficient for
 							// `:edge`, `:main`, and similar rolling tags
 							// on-push.yaml recreates on every merge.
-							ImagePullPolicy: validatorv1.ImagePullPolicy(aiperfImage),
+							ImagePullPolicy: validatorv1.ImagePullPolicy(aiperfImage, os.Getenv("AICR_VALIDATOR_IMAGE_TAG")),
 							Command:         []string{"/bin/sh", "-c"},
 							Args:            []string{script},
 						},

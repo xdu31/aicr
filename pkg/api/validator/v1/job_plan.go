@@ -18,7 +18,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -104,9 +103,9 @@ func GenerateRunID() string {
 
 // ImagePullPolicy determines the pull policy for a container image.
 // Returns Never for local side-loaded images (ko.local, kind.local),
-// Always for :latest tag or AICR_VALIDATOR_IMAGE_TAG override,
+// Always for :latest tag or when imageTagOverride is set,
 // IfNotPresent for digest-pinned or versioned tags.
-func ImagePullPolicy(image string) corev1.PullPolicy {
+func ImagePullPolicy(image string, imageTagOverride string) corev1.PullPolicy {
 	// Trailing slash anchors the match to the full registry segment so a
 	// real registry like `ko.localhost:5000/...` is not mistaken for a
 	// side-loaded `ko.local/...` ref and wrongly forced to PullNever.
@@ -118,7 +117,7 @@ func ImagePullPolicy(image string) corev1.PullPolicy {
 		// also required for disconnected/air-gapped deployments.
 		return corev1.PullIfNotPresent
 	}
-	if os.Getenv("AICR_VALIDATOR_IMAGE_TAG") != "" {
+	if imageTagOverride != "" {
 		return corev1.PullAlways
 	}
 	if strings.HasSuffix(image, ":latest") {
@@ -141,6 +140,8 @@ func Plan(
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
 	nodeSelector map[string]string,
+	imageRegistryOverride string,
+	imageTagOverride string,
 ) []JobPlan {
 
 	var plans []JobPlan
@@ -162,7 +163,8 @@ func Plan(
 		// Create a plan for each entry
 		for _, entry := range entries {
 			plan := BuildJobPlan(entry, runID, namespace, version, commit,
-				serviceAccount, imagePullSecrets, tolerations, nodeSelector)
+				serviceAccount, imagePullSecrets, tolerations, nodeSelector,
+				imageRegistryOverride, imageTagOverride)
 			plans = append(plans, plan)
 		}
 	}
@@ -172,6 +174,12 @@ func Plan(
 
 // BuildJobPlan creates a JobPlan from a validator entry.
 // Exposed as public for verification and testing purposes.
+//
+// The tolerations and nodeSelector parameters apply to inner workloads spawned
+// by validators (e.g., GPU benchmarks, NCCL tests) and are forwarded via
+// AICR_TOLERATIONS and AICR_NODE_SELECTOR environment variables. The orchestrator
+// Job Pod itself always uses tolerate-all scheduling ({Operator: TolerationOpExists})
+// and no node selector to ensure it can schedule on any available CPU node.
 func BuildJobPlan(
 	entry ValidatorEntry,
 	runID string,
@@ -182,6 +190,8 @@ func BuildJobPlan(
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
 	nodeSelector map[string]string,
+	imageRegistryOverride string,
+	imageTagOverride string,
 ) JobPlan {
 
 	timeout := entry.Timeout
@@ -190,7 +200,8 @@ func BuildJobPlan(
 	}
 
 	// Build environment variables
-	env := buildEnv(entry, runID, version, commit, timeout, nodeSelector, tolerations)
+	env := buildEnv(entry, runID, version, commit, timeout, nodeSelector, tolerations,
+		imageRegistryOverride, imageTagOverride)
 
 	// Build volumes
 	volumes := buildVolumes(runID)
@@ -241,7 +252,8 @@ func RenderPlan(plan JobPlan) *batchv1.Job {
 	}
 
 	// Determine image pull policy
-	pullPolicy := ImagePullPolicy(plan.Image)
+	// Note: imageTagOverride already applied to plan.Image during BuildJobPlan
+	pullPolicy := ImagePullPolicy(plan.Image, "")
 
 	jobObj := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -305,7 +317,8 @@ func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobAppl
 	}
 
 	// Determine image pull policy
-	pullPolicy := ImagePullPolicy(plan.Image)
+	// Note: imageTagOverride already applied to plan.Image during BuildJobPlan
+	pullPolicy := ImagePullPolicy(plan.Image, "")
 
 	// Build environment variables
 	envApply := buildEnvVarApply(plan.Env)
