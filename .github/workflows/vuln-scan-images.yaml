@@ -222,6 +222,16 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
+      - name: Debug VEX inputs (pre-scan)
+        if: contains(matrix.image, 'aiperf-bench')
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "pwd=$(pwd)"
+          ls -la .grype.yaml .openvex.json
+          echo "--- .openvex.json statement names ---"
+          jq -r '.statements | map(.vulnerability.name) | .[]' .openvex.json
+
       - name: Scan container image
         id: scan
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
@@ -237,6 +247,34 @@ jobs:
           # products whose PURL matches, so this is a no-op for the other
           # images in the matrix.
           vex: .openvex.json
+
+      - name: Debug scan output (aiperf-bench only)
+        if: always() && contains(matrix.image, 'aiperf-bench')
+        shell: bash
+        run: |
+          set -euo pipefail
+          JSON_FILE="${{ steps.scan.outputs.json }}"
+          echo "json=${JSON_FILE}"
+          ls -la "${JSON_FILE}" || true
+          echo "--- source target.userInput ---"
+          jq -r '.source.target.userInput // empty' "${JSON_FILE}"
+          echo "--- source target.repoDigests ---"
+          jq -r '.source.target.repoDigests // empty' "${JSON_FILE}"
+          echo "--- source target.labels ---"
+          jq -r '.source.target.labels // empty' "${JSON_FILE}"
+          echo "--- HIGH+ in .matches[] (should be empty if VEX applied) ---"
+          jq '[.matches[]
+            | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
+            | {id: .vulnerability.id,
+               related: [.relatedVulnerabilities[]?.id],
+               pkg: .artifact.name,
+               purl: .artifact.purl}]' "${JSON_FILE}"
+          echo "--- HIGH+ in .ignoredMatches[] (should hold VEX-suppressed entries) ---"
+          jq '[.ignoredMatches[]?
+            | select(.match.vulnerability.severity == "High" or .match.vulnerability.severity == "Critical")
+            | {id: .match.vulnerability.id, rules: .appliedIgnoreRules}]' "${JSON_FILE}"
+          echo "--- ignoredMatches total count ---"
+          jq '.ignoredMatches // [] | length' "${JSON_FILE}"
 
       - name: Extract severity counts
         shell: bash
