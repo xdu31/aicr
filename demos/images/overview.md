@@ -41,9 +41,6 @@ Column header in NVIDIA Green: "What Goes Into a Recipe"
 
 Two rows of component chip badges (rounded rectangle, white background, soft blue border, dark text). Chips are grouped by a thin colored left-edge bar:
 
-Row 1 — NVIDIA Green left edge (label "GPU Stack" in small grey above):
-"GPU Operator" · "Device Plugin" · "Container Toolkit" · "DCGM" · "NVSentinel"
-
 Row 1 — Blue left edge (label "Node & Platform"):
 "Nodewright" · "Network Operator" · "NFD" · "cert-manager"
 
