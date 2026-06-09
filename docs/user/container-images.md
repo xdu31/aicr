@@ -49,7 +49,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | nfd | helm | node-feature-discovery | 0.18.3 | 1 |
 | nodewright-customizations | manifest | — | — | 5 |
 | nodewright-operator | helm | skyhook-operator | v0.15.1 | 3 |
-| nvidia-dra-driver-gpu | helm | nvidia/nvidia-dra-driver-gpu | 25.12.0 | 1 |
+| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.3.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
@@ -187,7 +187,7 @@ _No images extracted._
 
 ### nvidia-dra-driver-gpu
 
-- `nvcr.io/nvidia/k8s-dra-driver-gpu:v25.12.0`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.0`
 
 ### nvsentinel
 
@@ -237,10 +237,10 @@ The trade-off is intentional. Pinning an image gives reproducibility; deferring 
 
 AICR pulls from a deliberately diverse set of registries:
 
-- **`nvcr.io`** — NVIDIA's primary container registry; GPU Operator, Network Operator, DRA driver, NIM Operator, Dynamo Platform.
+- **`nvcr.io`** — NVIDIA's primary container registry; GPU Operator, Network Operator, NIM Operator, Dynamo Platform.
 - **`ghcr.io`** — GitHub Container Registry; nvsentinel, nodewright, kai-scheduler, grove, kubeflow-trainer, k8s-ephemeral-storage-metrics.
 - **`quay.io`** — cert-manager and Prometheus components.
-- **`registry.k8s.io`** — Kubernetes SIG components (NFD, prometheus-adapter, kueue, csi-sidecars).
+- **`registry.k8s.io`** — Kubernetes SIG components (DRA driver, NFD, prometheus-adapter, kueue, csi-sidecars).
 - **`public.ecr.aws`** — AWS public artifacts (aws-ebs-csi-driver).
 - **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry below shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
 - **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).
@@ -323,9 +323,9 @@ Component: nvidia-dra-driver-gpu (1 images)
 Presence-only check: does NOT verify publisher trust/identity.
 Y = artifact attached, - = artifact absent, ? = could not probe.
 
-  Image                                       Sig  SBOM  Prov  Notes
-  ------------------------------------------  ---  ----  ----  -----
-  nvcr.io/nvidia/k8s-dra-driver-gpu:v25.12.0  Y    -     -
+  Image                                                           Sig  SBOM  Prov  Notes
+  --------------------------------------------------------------  ---  ----  ----  -----
+  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.0  Y    -     -
 
 Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
 ```

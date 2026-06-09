@@ -40,7 +40,22 @@
 #   The DRA driver remains installed for non-GPU DRA resources (compute-domain, etc.)
 #   but will not advertise GPU ResourceSlices.
 
-# Override release name prefix to avoid aicr-stack- prefix in resource names
+# Pin rendered resource names to nvidia-dra-driver-gpu-*.
+#
+# - fullnameOverride strips the aicr-stack- release prefix from the
+#   resources that use the chart's fullname helper (ServiceAccounts,
+#   RoleBindings).
+# - nameOverride is needed because v0.4.0 of the chart uses the
+#   `dra-driver-nvidia-gpu.name` helper for the controller Deployment
+#   and the kubelet-plugin DaemonSet. That helper resolves to
+#   `nameOverride || .Chart.Name`, so without it the rendered names
+#   would be `dra-driver-nvidia-gpu-controller` and
+#   `dra-driver-nvidia-gpu-kubelet-plugin`, breaking the
+#   nvidia-dra-driver-gpu-* references in
+#   recipes/checks/nvidia-dra-driver-gpu/health-check.yaml,
+#   validators/conformance/dra_support_check.go, and
+#   tests/chainsaw/ai-conformance/common/assert-dra-driver.yaml.
+nameOverride: nvidia-dra-driver-gpu
 fullnameOverride: nvidia-dra-driver-gpu
 
 # Specify the driver root on the host.
