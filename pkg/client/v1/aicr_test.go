@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"sigs.k8s.io/yaml"
 )
 
 func TestNewClientRequiresRecipeSource(t *testing.T) {
@@ -843,6 +844,242 @@ func TestResolveRecipeFromSnapshot(t *testing.T) {
 	}
 }
 
+// gpuOperatorDriverEnabled pulls the injected driver.enabled bool from
+// a resolved recipe's gpu-operator ComponentRef Overrides map. Returns
+// (value, true) when the override key is present with a bool value;
+// (false, false) when the key is absent — which is the "no injection"
+// signal the snapshot-driven auto-detect tests assert on.
+func gpuOperatorDriverEnabled(t *testing.T, rec *aicr.RecipeResult) (bool, bool) {
+	t.Helper()
+	if rec == nil {
+		t.Fatal("nil RecipeResult")
+	}
+	resolved := rec.Resolved()
+	if resolved == nil {
+		t.Fatal("nil Resolved()")
+	}
+	for _, ref := range resolved.ComponentRefs {
+		if ref.Name != "gpu-operator" {
+			continue
+		}
+		driver, ok := ref.Overrides["driver"].(map[string]any)
+		if !ok {
+			return false, false
+		}
+		v, ok := driver["enabled"].(bool)
+		return v, ok
+	}
+	t.Fatal("gpu-operator ref not found in resolved recipe")
+	return false, false
+}
+
+// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSPreinstalled asserts
+// the AKS win path: when the sampled GPU node reports driver-loaded=true,
+// the resolved h100-aks-training recipe carries the injected
+// gpu-operator.overrides.driver.enabled=false so the Operator does not
+// install a second driver on top of the one Azure's --gpu-driver Install
+// nodepool has already provisioned.
+func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSPreinstalled(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("aks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(true))
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	}
+
+	enabled, present := gpuOperatorDriverEnabled(t, rec)
+	if !present {
+		t.Fatal("driver.enabled override missing — expected the auto-detect injection")
+	}
+	if enabled {
+		t.Fatalf("driver.enabled = true, want false (Operator must NOT install driver when platform preinstalled it)")
+	}
+}
+
+// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSAbsent asserts the
+// symmetric no-op: when the sampled node reports driver-loaded=false, no
+// driver override is injected, so the AKS values file's default (chart
+// default: true — the Operator DOES install the driver) stands.
+func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSAbsent(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("aks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(false))
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	}
+
+	if _, present := gpuOperatorDriverEnabled(t, rec); present {
+		t.Fatal("driver.enabled override present, want no injection under only-false policy")
+	}
+}
+
+// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_EKSPreinstalled proves
+// the injection is provider-agnostic (no service gate) — an EKS resolve
+// against a preinstalled-driver snapshot also receives driver.enabled=false.
+// This is the fix path for EKS GPU-optimized AMIs that ship an NVIDIA
+// driver, where the base values.yaml default driver.enabled=true would
+// otherwise cause a double-install.
+func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_EKSPreinstalled(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(true))
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	}
+
+	enabled, present := gpuOperatorDriverEnabled(t, rec)
+	if !present {
+		t.Fatal("driver.enabled override missing — expected the auto-detect injection on EKS too")
+	}
+	if enabled {
+		t.Fatalf("driver.enabled = true, want false")
+	}
+}
+
+// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_NoGPUMeasurement asserts
+// that a snapshot with only a K8s measurement (no GPU subtype at all — the
+// signal is Unknown) leaves the recipe untouched. This guards the
+// no-cluster / criteria-only path where callers pass a partial snapshot.
+func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_NoGPUMeasurement(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("aks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), k8sVersionSnapshot())
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	}
+
+	if _, present := gpuOperatorDriverEnabled(t, rec); present {
+		t.Fatal("driver.enabled override present without a GPU measurement — signal must be Unknown")
+	}
+}
+
+// TestBundleComponents_GPUDriverAutoDetect_RendersInHelmValues closes the
+// end-to-end loop: after ResolveRecipeFromSnapshot injects the override,
+// prove it actually reaches the rendered Helm values a deployer installs.
+// The snapshot-driven Overrides["driver"]["enabled"] must beat the base
+// values.yaml default (driver.enabled=true at
+// recipes/components/gpu-operator/values.yaml:153) in the final bundle
+// output, per the base -> ValuesFile -> Overrides precedence merge in
+// pkg/recipe/adapter.go. This closes the "config-propagation" gap the
+// per-provider unit tests do not exercise on their own.
+func TestBundleComponents_GPUDriverAutoDetect_RendersInHelmValues(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(true))
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	}
+
+	bundles, err := c.BundleComponents(t.Context(), rec)
+	if err != nil {
+		t.Fatalf("BundleComponents: %v", err)
+	}
+
+	var found bool
+	for _, b := range bundles {
+		if b.Component.Name != "gpu-operator" {
+			continue
+		}
+		found = true
+		if len(b.HelmValues) == 0 {
+			t.Fatal("gpu-operator HelmValues is empty")
+		}
+		var v map[string]any
+		if err := yaml.Unmarshal(b.HelmValues, &v); err != nil {
+			t.Fatalf("unmarshal HelmValues: %v", err)
+		}
+		driver, ok := v["driver"].(map[string]any)
+		if !ok {
+			t.Fatalf("rendered helm values have no driver map; got %v", v["driver"])
+		}
+		enabled, ok := driver["enabled"].(bool)
+		if !ok {
+			t.Fatalf("driver.enabled = %v (%T), want bool", driver["enabled"], driver["enabled"])
+		}
+		if enabled {
+			t.Fatal("driver.enabled = true in rendered Helm values — snapshot-driven Overrides did not beat the base values.yaml default")
+		}
+	}
+	if !found {
+		t.Fatal("gpu-operator not found in BundleComponents output")
+	}
+}
+
 // TestResolveRecipeFromSnapshot_NilArgs pins the bounds-checking contract:
 // nil receiver, nil context, nil criteria, and nil snapshot each surface a
 // structured ErrCodeInvalidRequest rather than panicking on a nil dereference.
@@ -1244,6 +1481,33 @@ func k8sVersionSnapshot() *aicr.Snapshot {
 				WithSubtypeBuilder(
 					measurement.NewSubtypeBuilder("server").
 						SetString("version", version),
+				).
+				Build(),
+		},
+	})
+}
+
+// gpuHardwareSnapshot builds a Snapshot that satisfies the same K8s
+// readiness constraint as k8sVersionSnapshot and additionally carries a
+// GPU/hardware subtype with driver-loaded set to the given value.
+// Used to drive the snapshot-based auto-detection of the GPU Operator's
+// driver.enabled Helm value (see gpu_driver_state.go).
+func gpuHardwareSnapshot(driverLoaded bool) *aicr.Snapshot {
+	const version = "v1.33.0"
+	return aicr.WrapSnapshot(&snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			measurement.NewMeasurement(measurement.TypeK8s).
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("server").
+						SetString("version", version),
+				).
+				Build(),
+			measurement.NewMeasurement(measurement.TypeGPU).
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("hardware").
+						SetBool("gpu-present", true).
+						SetInt("gpu-count", 8).
+						SetBool("driver-loaded", driverLoaded),
 				).
 				Build(),
 		},

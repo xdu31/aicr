@@ -675,6 +675,12 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	if err != nil {
 		return nil, err
 	}
+	// Snapshot-driven post-processing: when the sampled GPU node already
+	// has the NVIDIA kernel driver loaded, inject
+	// gpu-operator.driver.enabled=false so the Operator does not install
+	// a second driver on top. Only-false policy — safe across every
+	// provider (see gpu_driver_state.go for the full rationale).
+	applyGPUDriverAutoOverride(internal, computeGPUDriverState(toInternalSnapshot(snap)))
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err

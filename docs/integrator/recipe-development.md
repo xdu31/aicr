@@ -276,6 +276,8 @@ Base → ValuesFile → Overrides → CLI --set flags
 # Result: driver.version="580.13.01", driver.repository="nvcr.io/nvidia" (preserved)
 ```
 
+**Snapshot-driven override — `gpu-operator.driver.enabled`.** When a recipe is resolved from a snapshot (via `aicr recipe --snapshot` or `ResolveRecipeFromSnapshot`), AICR reads the sampled GPU node's `driver-loaded` measurement and injects `gpu-operator.overrides.driver.enabled=false` when the NVIDIA kernel module is already loaded on the node — landing at the top of the merge chain so it wins over any provider values file. Policy is only-false (never forces `true`), so recipes resolved without a snapshot fall back to today's static defaults. See [Component Catalog › GPU Operator Driver Auto-Detect](../user/component-catalog.md#gpu-operator-driver-auto-detect).
+
 ## Disable a Component in an Overlay
 
 Set `overrides.enabled: false` on a `componentRef` to drop a component a base

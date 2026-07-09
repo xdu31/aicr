@@ -64,6 +64,22 @@ The Topology Updater requires the kubelet `podResources` gRPC socket. The `Kubel
 
 See the upstream [Topology Updater docs](https://kubernetes-sigs.github.io/node-feature-discovery/stable/usage/nfd-topology-updater.html) for runtime consumer examples.
 
+### GPU Operator Driver Auto-Detect
+
+When a recipe is resolved from a snapshot (`aicr recipe --snapshot snap.yaml`, or the `ResolveRecipeFromSnapshot` SDK entry point), AICR reads the sampled GPU node's `driver-loaded` measurement and, when the NVIDIA kernel module is already loaded, injects `components.gpu-operator.overrides.driver.enabled=false` into the resolved recipe. The override lands at the top of the merge chain (`base values.yaml → ValuesFile → Overrides`), so the rendered Helm values a deployer installs carry `driver.enabled: false` regardless of what the static provider values file (e.g. `values-aks.yaml`) would default to. This prevents the GPU Operator from installing a second driver on top of one the platform has already provisioned. It applies to every provider — the two most common cases are:
+
+- **AKS** — nodepools created with `--gpu-driver Install` (Azure provisions the driver). See the [AKS driver-only profile](../integrator/aks-gpu-setup.md#alternative-use-the-aks-driver-only-profile) for AKS-specific ownership-mode details.
+- **EKS** — GPU-optimized AMIs that ship an NVIDIA driver preinstalled on the AMI itself.
+
+Overlays that already carry `driver.enabled=false` in their values file (GKE-COS, OKE — both platforms preinstall drivers on GPU node images) receive the same override, byte-for-byte idempotently: the rendered value is unchanged.
+
+The policy is **only-false**: the auto-detect never forces `driver.enabled=true`, so recipes resolved without a snapshot (or targeting a node without a loaded driver) fall back to today's static defaults. Two operational consequences:
+
+- Criteria-only resolves (`aicr recipe --service ... --accelerator ...`) and no-cluster mode see zero behavior change — no snapshot, no override.
+- A stale snapshot from an older CLI that omits the `driver-loaded` reading is treated as *unknown*, not *absent*, so it cannot flip a hardened overlay.
+
+The signal is a single-node sample: the snapshotter Job runs on one `nvidia.com/gpu.present=true` node, so its `driver-loaded` reading is representative only when every GPU pool is in the same driver state. Mixed-pool clusters (some nodes with a preinstalled driver, some without) are out of scope for the auto-detect and tracked in [#464](https://github.com/NVIDIA/aicr/issues/464).
+
 To see exactly which components appear in a given recipe, generate one:
 
 ```bash
