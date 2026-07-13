@@ -15,10 +15,13 @@
 package aicr
 
 import (
+	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -34,6 +37,13 @@ const gpuOperatorComponentName = "gpu-operator"
 // does not pull the collector package.
 const gpuHardwareSubtypeName = "hardware"
 
+// k8sPolicySubtypeName is the subtype under the K8s measurement that
+// pkg/collector/k8s writes ClusterPolicy custom resource spec data
+// into. Non-empty data indicates that at least one ClusterPolicy CRD
+// is installed — in practice that means the GPU Operator (or a
+// compatible policy CRD) is already running on the cluster.
+const k8sPolicySubtypeName = "policy"
+
 // gpuDriverState reports what the snapshot tells us about the NVIDIA
 // kernel driver on the sampled GPU node.
 //
@@ -42,6 +52,9 @@ const gpuHardwareSubtypeName = "hardware"
 // the state reflects that one sample. On homogeneous clusters — the
 // common case — it is representative of every GPU pool. Mixed-pool
 // clusters are out of scope for now and tracked separately (see #464).
+// applyGPUDriverAutoOverride surfaces a slog.Warn when the topology
+// signal indicates a non-uniform GPU pool so the fail-direction (some
+// pools may come up driverless) is at least observable.
 type gpuDriverState int
 
 const (
@@ -60,8 +73,11 @@ const (
 	// gpuDriverPreinstalled means the sampled GPU node has the nvidia
 	// kernel module loaded. Auto-inject driver.enabled=false to prevent
 	// the GPU Operator from installing a second driver on top of the
-	// one the platform (Azure --gpu-driver Install, a GPU-optimized
-	// EKS AMI, GKE-COS, OKE bare-metal) has already provisioned.
+	// one the platform (GKE-COS, OKE bare-metal) has already
+	// provisioned — but only when the resolved overlay already carries
+	// the full coordinated preinstalled-driver profile (see
+	// hasPreinstalledDriverProfile). Bare AKS/EKS get a warning instead
+	// of a half-configured Operator.
 	gpuDriverPreinstalled
 
 	// gpuDriverAbsent means the sampled GPU node does not have the
@@ -72,6 +88,24 @@ const (
 	// would only regress those.
 	gpuDriverAbsent
 )
+
+// String returns a stable, log-friendly name for the state — used by
+// the slog.Debug/Warn output on the no-op and gated paths so operators
+// debugging "why didn't the override land" can trace the resolved
+// classification without decoding an int.
+func (s gpuDriverState) String() string {
+	switch s {
+	case gpuDriverUnknown:
+		return "unknown"
+	case gpuDriverNotObserved:
+		return "not-observed"
+	case gpuDriverPreinstalled:
+		return "preinstalled"
+	case gpuDriverAbsent:
+		return "absent"
+	}
+	return "invalid"
+}
 
 // computeGPUDriverState reduces the snapshot to the single per-cluster
 // signal used by the auto-detect override: is the NVIDIA driver already
@@ -109,15 +143,8 @@ func computeGPUDriverState(snap *snapshotter.Snapshot) gpuDriverState {
 		}
 	}
 	if count := hw.Get(measurement.KeyGPUCount); count != nil {
-		switch v := count.Any().(type) {
-		case int:
-			if v == 0 {
-				return gpuDriverNotObserved
-			}
-		case int64:
-			if v == 0 {
-				return gpuDriverNotObserved
-			}
+		if isZeroCount(count.Any()) {
+			return gpuDriverNotObserved
 		}
 	}
 
@@ -127,6 +154,9 @@ func computeGPUDriverState(snap *snapshotter.Snapshot) gpuDriverState {
 	}
 	b, ok := loaded.Any().(bool)
 	if !ok {
+		// A non-bool driver-loaded reading is a corrupt or older-schema
+		// signal — fail closed to Unknown so the injection never lands
+		// on ambiguous input (see CLAUDE.md's "fail-closed" guidance).
 		return gpuDriverUnknown
 	}
 	if b {
@@ -135,33 +165,224 @@ func computeGPUDriverState(snap *snapshotter.Snapshot) gpuDriverState {
 	return gpuDriverAbsent
 }
 
+// isZeroCount treats int, int64, and JSON-decoded float64 uniformly.
+// A JSON or sigs.k8s.io/yaml round-trip delivers integer readings as
+// float64; the yaml.v3 path used by the local snapshot loader delivers
+// them as int64. Both must produce the same NotObserved classification
+// so a snapshot posted to /v1/recipe cannot slip past the zero-count
+// gate. A non-integral float64 is rejected as an unknown format
+// (returns false → non-zero), matching the fail-closed pattern
+// documented in CLAUDE.md's anti-pattern list.
+func isZeroCount(v any) bool {
+	switch n := v.(type) {
+	case int:
+		return n == 0
+	case int64:
+		return n == 0
+	case float64:
+		if float64(int64(n)) != n {
+			return false
+		}
+		return int64(n) == 0
+	}
+	return false
+}
+
+// hasGPUOperatorClusterPolicy reports whether the snapshot's K8s
+// measurement recorded any ClusterPolicy resources. A non-empty policy
+// subtype indicates at least one ClusterPolicy CRD is installed —
+// which in practice means the GPU Operator (or a compatible policy
+// CRD) is already running on the cluster.
+//
+// Used to warn on the self-referential-signal case: driver-loaded=true
+// on a snapshot taken AFTER an AICR deploy could be reporting the
+// operator-managed driver, and injecting enabled=false + redeploying
+// would tear that driver DaemonSet down. Operators are told to
+// snapshot BEFORE deploying; the warning is the observability that
+// helps them recognize the mistake.
+func hasGPUOperatorClusterPolicy(snap *snapshotter.Snapshot) bool {
+	if snap == nil {
+		return false
+	}
+	for _, m := range snap.Measurements {
+		if m == nil || m.Type != measurement.TypeK8s {
+			continue
+		}
+		sub := m.GetSubtype(k8sPolicySubtypeName)
+		if sub == nil {
+			continue
+		}
+		if len(sub.Data) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// hasHeterogeneousGPUPool reports whether the snapshot's topology
+// measurement records multiple distinct values for any GPU-scoped node
+// label (nvidia.com/gpu.*) or the standard instance-type label. The
+// topology encoder disambiguates such keys by appending ".<value>", so
+// any key of that shape is our proxy for "the sampled GPU node is not
+// representative of every GPU pool" and warrants a warning.
+//
+// This is a hint, not a gate: mixed-pool support requires per-node
+// collector fan-out (#464), and until that lands a single-node sample
+// remains the ground truth. Callers are told which direction they can
+// fail toward — some non-preinstalled pools may come up driverless
+// after the injection.
+func hasHeterogeneousGPUPool(snap *snapshotter.Snapshot) bool {
+	if snap == nil {
+		return false
+	}
+	for _, m := range snap.Measurements {
+		if m == nil || m.Type != measurement.TypeNodeTopology {
+			continue
+		}
+		labels := m.GetSubtype("label")
+		if labels == nil {
+			continue
+		}
+		for k := range labels.Data {
+			if !isDisambiguatedLabelKey(k) {
+				continue
+			}
+			switch {
+			case strings.HasPrefix(k, "nvidia.com/gpu."):
+				return true
+			case strings.HasPrefix(k, "node.kubernetes.io/instance-type."):
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isDisambiguatedLabelKey reports whether k is the disambiguated form
+// the topology encoder produces (Key + "." + Value). The single-value
+// form of an nvidia.com/gpu.<name> label already carries dots inside
+// the fixed prefix (nvidia.com and gpu.<name>), so the check strips
+// the base label prefix first and asks whether the *tail* — the value
+// the encoder appended — is non-empty. For instance-type, whose
+// single-value form ends at the "instance-type" segment, presence of
+// any non-empty tail after the trailing dot is enough.
+func isDisambiguatedLabelKey(k string) bool {
+	if suffix, ok := strings.CutPrefix(k, "nvidia.com/gpu."); ok {
+		// The single-value label key ends here (e.g. "product",
+		// "count", "family"). The encoder appends "." + <value> only
+		// on divergence, so any dot in the tail is our disambiguation
+		// signal. A trailing dot with no value is not real divergence.
+		dot := strings.IndexByte(suffix, '.')
+		return dot >= 0 && dot < len(suffix)-1
+	}
+	if suffix, ok := strings.CutPrefix(k, "node.kubernetes.io/instance-type."); ok {
+		return len(suffix) > 0
+	}
+	return false
+}
+
+// hasPreinstalledDriverProfile reports whether the resolved recipe's
+// gpu-operator component values (base + valuesFile, before the
+// snapshot-driven Overrides mutation) already declare
+// driver.enabled=false. That is the marker for a preinstalled-driver
+// overlay — one that also carries the coordinated toolkit / gdrcopy /
+// hostPaths.driverInstallDir settings the AKS driver-only-install
+// profile documents as required together.
+//
+// Bare AKS/EKS overlays lack this marker; auto-detect skips them so
+// callers get a warning instead of a half-configured Operator (driver
+// off, toolkit + gdrcopy still on with no operator-managed driver
+// root). Fixing those cases requires a full preinstalled-profile
+// overlay (tracked separately) — this gate keeps the current PR from
+// regressing them into a strictly worse state.
+func hasPreinstalledDriverProfile(ctx context.Context, r *recipe.RecipeResult) bool {
+	if r == nil {
+		return false
+	}
+	values, err := r.GetValuesForComponentWithContext(ctx, gpuOperatorComponentName)
+	if err != nil || len(values) == 0 {
+		return false
+	}
+	driver, ok := values["driver"].(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, ok := driver["enabled"].(bool)
+	if !ok {
+		return false
+	}
+	return !enabled
+}
+
 // applyGPUDriverAutoOverride injects driver.enabled=false into the
 // gpu-operator ComponentRef's Overrides map when the snapshot reports
-// a pre-installed driver on the sampled GPU node.
+// a pre-installed driver on the sampled GPU node AND the resolved
+// overlay already declares the coordinated preinstalled-driver profile.
 //
 // Policy is only-false: the function never forces driver.enabled=true.
-// That keeps the change safe across every provider — GKE-COS and OKE
-// values files already carry driver.enabled=false, so the injection is
-// byte-for-byte idempotent for them; AKS with --gpu-driver Install and
-// EKS on preinstalled-driver AMIs get the fix; every other state
-// (Absent, NotObserved, Unknown) is a no-op so callers who never pass a
-// snapshot see zero behavior change.
+// The injection is a no-op on rendered Helm output for overlays that
+// already carry the profile (the resolved recipe records the override
+// explicitly for auditability, so the emitted YAML is not byte-for-byte
+// identical); bare AKS/EKS get a slog.Warn instead so the operator
+// knows to add a proper preinstalled overlay before the deploy will do
+// the right thing.
 //
-// Merge precedence is base values.yaml → ValuesFile → Overrides (highest,
-// see pkg/recipe/adapter.go), so writing driver.enabled into Overrides
-// wins over every provider values file at bundle time.
-func applyGPUDriverAutoOverride(r *recipe.RecipeResult, state gpuDriverState) {
-	if r == nil || state != gpuDriverPreinstalled {
+// Merge precedence for the final Helm values is
+// base values.yaml → ValuesFile → Overrides (see pkg/recipe/adapter.go).
+// CLI --set flags still supersede everything.
+func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, snap *snapshotter.Snapshot) {
+	state := computeGPUDriverState(snap)
+	if r == nil {
+		slog.Debug("gpu-operator driver auto-detect: nil recipe result",
+			"state", state.String())
 		return
+	}
+	if state != gpuDriverPreinstalled {
+		slog.Debug("gpu-operator driver auto-detect: no-op",
+			"state", state.String(),
+			"component", gpuOperatorComponentName,
+			"reason", "driver state is not preinstalled")
+		return
+	}
+	if !hasPreinstalledDriverProfile(ctx, r) {
+		slog.Warn("gpu-operator driver auto-detect: pre-installed driver observed on sampled node, "+
+			"but the resolved overlay is not a preinstalled-driver profile "+
+			"(gpu-operator values do not declare driver.enabled=false). Skipping "+
+			"injection to avoid a half-configured Operator (driver off, toolkit "+
+			"and gdrcopy still enabled with no operator-managed driver root). "+
+			"Use a preinstalled-profile overlay (GKE-COS, OKE) or an overlay "+
+			"that declares the full coordinated profile.",
+			"component", gpuOperatorComponentName,
+			"state", state.String())
+		return
+	}
+	if hasGPUOperatorClusterPolicy(snap) {
+		slog.Warn("gpu-operator driver auto-detect: driver-loaded=true AND a ClusterPolicy is already "+
+			"present in the snapshot. AICR may have installed this driver on a prior "+
+			"deploy; re-resolving from a post-deploy snapshot and re-applying can tear "+
+			"the operator-managed driver DaemonSet down and leave new GPU nodes "+
+			"driverless. Recommendation: capture the snapshot BEFORE deploying the "+
+			"GPU Operator.",
+			"component", gpuOperatorComponentName)
+	}
+	if hasHeterogeneousGPUPool(snap) {
+		slog.Warn("gpu-operator driver auto-detect: topology reports non-uniform GPU labels "+
+			"across nodes. The GPU collector samples a single node, so the injected "+
+			"driver.enabled=false will apply cluster-wide; non-preinstalled GPU pools "+
+			"may come up driverless. Mixed-pool support is tracked in #464.",
+			"component", gpuOperatorComponentName)
 	}
 	for i := range r.ComponentRefs {
 		if r.ComponentRefs[i].Name != gpuOperatorComponentName {
 			continue
 		}
 		ref := &r.ComponentRefs[i]
-		if ref.Overrides == nil {
-			ref.Overrides = map[string]any{}
-		}
+		// Deep-copy Overrides (and any driver submap) before mutating so
+		// this write cannot alias into the sync.Once-cached MetadataStore
+		// or leak driver.enabled=false into a shared registry entry —
+		// see CLAUDE.md's "deep-copy helper that recurses into maps"
+		// anti-pattern. DeepCopyAnyMap(nil) returns a fresh empty map.
+		ref.Overrides = serializer.DeepCopyAnyMap(ref.Overrides)
 		driverAny, _ := ref.Overrides["driver"].(map[string]any)
 		if driverAny == nil {
 			driverAny = map[string]any{}
@@ -173,4 +394,6 @@ func applyGPUDriverAutoOverride(r *recipe.RecipeResult, state gpuDriverState) {
 			"reason", "driver-loaded=true")
 		return
 	}
+	slog.Debug("gpu-operator driver auto-detect: no gpu-operator component ref in resolved recipe",
+		"state", state.String())
 }

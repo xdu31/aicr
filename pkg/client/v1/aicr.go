@@ -654,13 +654,18 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 		return nil, err
 	}
 
+	// Convert once — both the constraint evaluator and the snapshot-driven
+	// post-processor read from the internal shape, so the same *Snapshot
+	// value threads through the whole path without a second copy.
+	internalSnap := toInternalSnapshot(snap)
+
 	// Evaluate each resolution constraint against the observed snapshot,
 	// mirroring the CLI's `recipe --snapshot` path. The evaluator bridges
 	// pkg/constraints.EvalResult into the recipe package's
 	// ConstraintEvalResult (kept distinct to avoid a recipe→constraints
 	// import cycle).
 	evaluator := func(constraint recipe.Constraint) recipe.ConstraintEvalResult {
-		v := constraints.Evaluate(constraint, toInternalSnapshot(snap))
+		v := constraints.Evaluate(constraint, internalSnap)
 		return recipe.ConstraintEvalResult{
 			Passed: v.Passed,
 			Actual: v.Actual,
@@ -676,11 +681,12 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 		return nil, err
 	}
 	// Snapshot-driven post-processing: when the sampled GPU node already
-	// has the NVIDIA kernel driver loaded, inject
+	// has the NVIDIA kernel driver loaded AND the resolved overlay
+	// declares the coordinated preinstalled-driver profile, inject
 	// gpu-operator.driver.enabled=false so the Operator does not install
-	// a second driver on top. Only-false policy — safe across every
-	// provider (see gpu_driver_state.go for the full rationale).
-	applyGPUDriverAutoOverride(internal, computeGPUDriverState(toInternalSnapshot(snap)))
+	// a second driver on top. Bare AKS/EKS overlays get a warning
+	// instead of the injection (see gpu_driver_state.go).
+	applyGPUDriverAutoOverride(ctx, internal, internalSnap)
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err

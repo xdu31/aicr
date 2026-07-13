@@ -123,6 +123,15 @@ func (b *Builder) BuildFromCriteria(ctx context.Context, c *Criteria) (*RecipeRe
 //
 // The evaluator function is typically created by wrapping
 // constraints.Evaluate, binding it to the snapshot data (see pkg/client/v1).
+//
+// Snapshot-driven Overrides live in the facade, not here. The builder
+// sees snapshot data only through the evaluator (used to include or
+// exclude overlays); any post-processing that mutates the resolved
+// recipe from measured state (e.g., the gpu-operator driver
+// auto-detect override in pkg/client/v1/gpu_driver_state.go) is
+// applied by the facade after this returns. A non-facade caller that
+// invokes BuildFromCriteriaWithEvaluator directly and wants those
+// measurement-driven overrides must apply them itself.
 func (b *Builder) BuildFromCriteriaWithEvaluator(ctx context.Context, c *Criteria, evaluator ConstraintEvaluatorFunc) (*RecipeResult, error) {
 	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
 		return store.BuildRecipeResultWithEvaluator(buildCtx, c, evaluator)

@@ -873,143 +873,125 @@ func gpuOperatorDriverEnabled(t *testing.T, rec *aicr.RecipeResult) (bool, bool)
 	return false, false
 }
 
-// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSPreinstalled asserts
-// the AKS win path: when the sampled GPU node reports driver-loaded=true,
-// the resolved h100-aks-training recipe carries the injected
-// gpu-operator.overrides.driver.enabled=false so the Operator does not
-// install a second driver on top of the one Azure's --gpu-driver Install
-// nodepool has already provisioned.
-func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSPreinstalled(t *testing.T) {
+// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect table-drives every
+// snapshot→resolve scenario the auto-detect must handle. Consolidates
+// the earlier per-provider tests so a new case (e.g. an intent variant,
+// a future preinstalled-profile overlay) is a single row rather than a
+// new test function.
+//
+// Post-M1 behavior matrix:
+//   - AKS + Preinstalled → SKIPPED. The bare AKS overlay carries no
+//     preinstalled-driver marker (values-aks.yaml leaves
+//     driver.enabled at chart default true), so the gate refuses to
+//     land a lone driver.enabled=false and logs a warning instead.
+//     The bug fix waits on a full AKS driver-only-install overlay.
+//   - EKS + Preinstalled → SKIPPED for the same reason (base
+//     values.yaml has driver.enabled=true).
+//   - GKE-COS + Preinstalled → INJECTED. The GKE-COS values file
+//     already declares driver.enabled=false plus the coordinated
+//     toolkit / driverInstallDir settings, so the override is
+//     semantically idempotent and safe.
+//   - Any provider + Absent → no override (only-false policy).
+//   - Any provider + Unknown (k8s-only snapshot) → no override.
+func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 	t.Parallel()
 
-	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	defer c.Close()
-
-	crit, err := recipe.BuildCriteriaWithRegistry(nil,
-		recipe.WithServiceRegistry("aks"),
-		recipe.WithAcceleratorRegistry("h100"),
-		recipe.WithIntentRegistry("training"),
-	)
-	if err != nil {
-		t.Fatalf("BuildCriteria: %v", err)
-	}
-
-	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(true))
-	if err != nil {
-		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
-	}
-
-	enabled, present := gpuOperatorDriverEnabled(t, rec)
-	if !present {
-		t.Fatal("driver.enabled override missing — expected the auto-detect injection")
-	}
-	if enabled {
-		t.Fatalf("driver.enabled = true, want false (Operator must NOT install driver when platform preinstalled it)")
-	}
-}
-
-// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSAbsent asserts the
-// symmetric no-op: when the sampled node reports driver-loaded=false, no
-// driver override is injected, so the AKS values file's default (chart
-// default: true — the Operator DOES install the driver) stands.
-func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_AKSAbsent(t *testing.T) {
-	t.Parallel()
-
-	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	defer c.Close()
-
-	crit, err := recipe.BuildCriteriaWithRegistry(nil,
-		recipe.WithServiceRegistry("aks"),
-		recipe.WithAcceleratorRegistry("h100"),
-		recipe.WithIntentRegistry("training"),
-	)
-	if err != nil {
-		t.Fatalf("BuildCriteria: %v", err)
-	}
-
-	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(false))
-	if err != nil {
-		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	tests := []struct {
+		name         string
+		service      string
+		os           string // "" leaves criteria OS unset
+		snap         *aicr.Snapshot
+		wantInjected bool
+	}{
+		{
+			name:         "aks bare + preinstalled snapshot skips (no profile gate)",
+			service:      "aks",
+			snap:         gpuHardwareSnapshot(true),
+			wantInjected: false,
+		},
+		{
+			name:         "aks + absent snapshot leaves defaults alone",
+			service:      "aks",
+			snap:         gpuHardwareSnapshot(false),
+			wantInjected: false,
+		},
+		{
+			name:         "eks bare + preinstalled snapshot skips (no profile gate)",
+			service:      "eks",
+			snap:         gpuHardwareSnapshot(true),
+			wantInjected: false,
+		},
+		{
+			name:         "gke-cos + preinstalled snapshot injects (profile gate satisfied)",
+			service:      "gke",
+			os:           "cos",
+			snap:         gpuHardwareSnapshot(true),
+			wantInjected: true,
+		},
+		{
+			name:         "gke-cos + absent snapshot leaves defaults alone",
+			service:      "gke",
+			os:           "cos",
+			snap:         gpuHardwareSnapshot(false),
+			wantInjected: false,
+		},
+		{
+			name:         "aks + k8s-only snapshot is Unknown → no override",
+			service:      "aks",
+			snap:         k8sVersionSnapshot(),
+			wantInjected: false,
+		},
+		{
+			name:         "gke-cos + k8s-only snapshot is Unknown → no override",
+			service:      "gke",
+			os:           "cos",
+			snap:         k8sVersionSnapshot(),
+			wantInjected: false,
+		},
 	}
 
-	if _, present := gpuOperatorDriverEnabled(t, rec); present {
-		t.Fatal("driver.enabled override present, want no injection under only-false policy")
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_EKSPreinstalled proves
-// the injection is provider-agnostic (no service gate) — an EKS resolve
-// against a preinstalled-driver snapshot also receives driver.enabled=false.
-// This is the fix path for EKS GPU-optimized AMIs that ship an NVIDIA
-// driver, where the base values.yaml default driver.enabled=true would
-// otherwise cause a double-install.
-func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_EKSPreinstalled(t *testing.T) {
-	t.Parallel()
+			c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
 
-	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	defer c.Close()
+			opts := []recipe.RegistryCriteriaOption{
+				recipe.WithServiceRegistry(tt.service),
+				recipe.WithAcceleratorRegistry("h100"),
+				recipe.WithIntentRegistry("training"),
+			}
+			if tt.os != "" {
+				opts = append(opts, recipe.WithOSRegistry(tt.os))
+			}
+			crit, err := recipe.BuildCriteriaWithRegistry(nil, opts...)
+			if err != nil {
+				t.Fatalf("BuildCriteria: %v", err)
+			}
 
-	crit, err := recipe.BuildCriteriaWithRegistry(nil,
-		recipe.WithServiceRegistry("eks"),
-		recipe.WithAcceleratorRegistry("h100"),
-		recipe.WithIntentRegistry("training"),
-	)
-	if err != nil {
-		t.Fatalf("BuildCriteria: %v", err)
-	}
+			rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), tt.snap)
+			if err != nil {
+				t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+			}
 
-	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), gpuHardwareSnapshot(true))
-	if err != nil {
-		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
-	}
-
-	enabled, present := gpuOperatorDriverEnabled(t, rec)
-	if !present {
-		t.Fatal("driver.enabled override missing — expected the auto-detect injection on EKS too")
-	}
-	if enabled {
-		t.Fatalf("driver.enabled = true, want false")
-	}
-}
-
-// TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_NoGPUMeasurement asserts
-// that a snapshot with only a K8s measurement (no GPU subtype at all — the
-// signal is Unknown) leaves the recipe untouched. This guards the
-// no-cluster / criteria-only path where callers pass a partial snapshot.
-func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect_NoGPUMeasurement(t *testing.T) {
-	t.Parallel()
-
-	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	defer c.Close()
-
-	crit, err := recipe.BuildCriteriaWithRegistry(nil,
-		recipe.WithServiceRegistry("aks"),
-		recipe.WithAcceleratorRegistry("h100"),
-		recipe.WithIntentRegistry("training"),
-	)
-	if err != nil {
-		t.Fatalf("BuildCriteria: %v", err)
-	}
-
-	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), k8sVersionSnapshot())
-	if err != nil {
-		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
-	}
-
-	if _, present := gpuOperatorDriverEnabled(t, rec); present {
-		t.Fatal("driver.enabled override present without a GPU measurement — signal must be Unknown")
+			enabled, present := gpuOperatorDriverEnabled(t, rec)
+			if tt.wantInjected {
+				if !present {
+					t.Fatal("driver.enabled override missing — expected the auto-detect injection")
+				}
+				if enabled {
+					t.Fatalf("driver.enabled = true, want false")
+				}
+				return
+			}
+			if present {
+				t.Fatalf("driver.enabled override present (value=%v), want no injection", enabled)
+			}
+		})
 	}
 }
 
@@ -1031,9 +1013,15 @@ func TestBundleComponents_GPUDriverAutoDetect_RendersInHelmValues(t *testing.T) 
 	}
 	defer c.Close()
 
+	// GKE-COS is the current fixture whose valuesFile already declares
+	// driver.enabled=false, so the auto-detect gate lets the injection
+	// through and we can prove it beats the base values.yaml default in
+	// the rendered Helm values. Bare AKS/EKS overlays are gated out
+	// pending a full preinstalled-driver profile.
 	crit, err := recipe.BuildCriteriaWithRegistry(nil,
-		recipe.WithServiceRegistry("eks"),
+		recipe.WithServiceRegistry("gke"),
 		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithOSRegistry("cos"),
 		recipe.WithIntentRegistry("training"),
 	)
 	if err != nil {
