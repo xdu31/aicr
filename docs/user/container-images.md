@@ -20,17 +20,19 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **33**
-- Unique images: **82**
+- Unique images: **85**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
+
+_Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recipes/components/<name>/values.yaml; per-recipe overlay overrides are not applied`
 
 ## Components
 
 | Component | Type | Chart | Pinned Version | Images |
 |-----------|------|-------|----------------|--------|
-| agentgateway | helm | agentgateway | v2.2.1 | 1 |
-| agentgateway-crds | helm | agentgateway-crds | v2.2.1 | 0 |
+| agentgateway | helm | agentgateway | v1.3.1 | 1 |
+| agentgateway-crds | helm | agentgateway-crds | v1.3.1 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
@@ -47,10 +49,10 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.17.1 | 1 |
-| network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
+| network-operator | helm | nvidia/network-operator | 26.1.1 | 4 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
-| nfd | helm | node-feature-discovery | 0.18.3 | 1 |
+| nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 5 |
@@ -63,11 +65,20 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
 
+## Version variants
+
+These versions are explicitly pinned by the listed sources and differ
+from the component's registry default above.
+
+| Component | Variant Version | Declared By | Images |
+|-----------|-----------------|-------------|--------|
+| kube-prometheus-stack | 83.7.0 | aks | 8 |
+
 ## Images by component
 
 ### agentgateway
 
-- `cr.agentgateway.dev/controller:v2.2.1`
+- `cr.agentgateway.dev/controller:v1.3.1`
 
 ### agentgateway-crds
 
@@ -177,7 +188,6 @@ _No images extracted._
 
 ### network-operator
 
-- `busybox:1.38@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
@@ -193,7 +203,7 @@ _No images extracted._
 
 ### nfd
 
-- `registry.k8s.io/nfd/node-feature-discovery:v0.18.3`
+- `registry.k8s.io/nfd/node-feature-discovery:v0.19.0`
 
 ### nfd-ocp
 
@@ -206,7 +216,7 @@ _No images extracted._
 ### nodewright-customizations
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.4.0@sha256:187c56c6d2104d48c7632c293def79c714b04dd85c587b7793818ceba9d4fb04`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.5.0@sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.1@sha256:6dedbbb8627dec88acdfd68867f60a3ddca88e5f4c62beddfb704a8e0cfe51d1`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
@@ -254,6 +264,17 @@ _No images extracted._
 ### slinky-slurm-operator-crds
 
 _No images extracted._
+
+### kube-prometheus-stack@83.7.0 (variant)
+
+- `docker.io/grafana/grafana:12.4.3`
+- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.1`
+- `quay.io/kiwigrid/k8s-sidecar:2.6.0`
+- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
+- `quay.io/prometheus/alertmanager:v0.32.0`
+- `quay.io/prometheus/node-exporter:v1.11.1`
+- `quay.io/prometheus/prometheus:v3.11.2`
+- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 <!-- END AICR-BOM -->
 
