@@ -20,12 +20,15 @@
 # on NVKE nodes because the DOCA container unloads mlx5_core and takes the
 # node's primary address with it.
 #
-# NOT VALIDATED. No packet has crossed these rails. On the reference cluster
-# the spare ConnectX-9 ports have no path between nodes -- address one on each
-# worker and ping, and it is ARP FAILED -- because the BlueField DPU bridges
-# only the port carrying the node address. Bridging the rest is DPU-side work
-# outside the tenant cluster. Until that lands, treat every value here as a
-# proposal derived from the node inventory, not a measurement.
+# DEPLOYED AND ATTACHED, BUT NO TRAFFIC HAS CROSSED THEM. Exercised on the
+# reference cluster: the SR-IOV operator created one VF per port on both
+# workers and advertised all eight as allocatable, nv-ipam assigned an address
+# per rail from the pools below, multus attached net1..net8 to a pod, and every
+# VF came up with its own RDMA device and a RoCE v2 GID. What has NOT been
+# shown is a packet between nodes -- the spare ConnectX-9 ports have no path
+# between workers (address one on each and ping: ARP FAILED), because the
+# BlueField DPU bridges only the port carrying the node address. Bridging the
+# rest is DPU-side work outside the tenant cluster.
 #
 # Differences from the GB200 file, all forced by the hardware:
 #
@@ -42,8 +45,13 @@
 #   No ib_ipoib, and no rdma-modules dependency. GB200's VF netdevs are IPoIB
 #   children; RoCE VF netdevs are plain Ethernet.
 #
-#   trust on / spoofChk off, which GB200 does not set: a RoCE v2 VF needs to
-#   use its own GID and source MAC for the rolled UDP encapsulation.
+#   NO VF attributes at all -- no linkState, no trust, no spoofChk. GB200 sets
+#   linkState: enable; it cannot be used here. Measured: the PF driver refuses
+#   every one of them, and sriov-cni fails the attachment with "operation not
+#   permitted" on whichever is set first (spoofchk, then trust, then link
+#   state). The PF is owned by the BlueField DPU, so the host cannot
+#   administer VF attributes even though it can create the VFs. With all three
+#   removed the attachment succeeds.
 #
 # Shared with the GB200 file, and load-bearing:
 #
@@ -141,9 +149,6 @@ spec:
       "poolName": "nv-ipam-pool-rail-0"
     }
   resourceName: sriov_resource_rail_0
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 ---
 apiVersion: nv-ipam.nvidia.com/v1alpha1
@@ -218,9 +223,6 @@ spec:
       "poolName": "nv-ipam-pool-rail-1"
     }
   resourceName: sriov_resource_rail_1
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 ---
 apiVersion: nv-ipam.nvidia.com/v1alpha1
@@ -295,9 +297,6 @@ spec:
       "poolName": "nv-ipam-pool-rail-2"
     }
   resourceName: sriov_resource_rail_2
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 ---
 apiVersion: nv-ipam.nvidia.com/v1alpha1
@@ -372,9 +371,6 @@ spec:
       "poolName": "nv-ipam-pool-rail-3"
     }
   resourceName: sriov_resource_rail_3
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 ---
 apiVersion: nv-ipam.nvidia.com/v1alpha1
@@ -449,9 +445,6 @@ spec:
       "poolName": "nv-ipam-pool-rail-4"
     }
   resourceName: sriov_resource_rail_4
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 ---
 apiVersion: nv-ipam.nvidia.com/v1alpha1
@@ -526,9 +519,6 @@ spec:
       "poolName": "nv-ipam-pool-rail-5"
     }
   resourceName: sriov_resource_rail_5
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 ---
 apiVersion: nv-ipam.nvidia.com/v1alpha1
@@ -603,9 +593,6 @@ spec:
       "poolName": "nv-ipam-pool-rail-6"
     }
   resourceName: sriov_resource_rail_6
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 ---
 apiVersion: nv-ipam.nvidia.com/v1alpha1
@@ -680,8 +667,5 @@ spec:
       "poolName": "nv-ipam-pool-rail-7"
     }
   resourceName: sriov_resource_rail_7
-  linkState: enable
-  trust: "on"
-  spoofChk: "off"
   networkNamespace: default
 {{- end }}

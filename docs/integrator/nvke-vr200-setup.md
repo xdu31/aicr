@@ -79,14 +79,27 @@ It stands up the `nic-configuration-daemon` that `aicr snapshot
 --discover-network` needs, plus the addressing and multus the RoCE rails
 attach through. Still no `ofedDriver`: NVKE runs the host's inbox `mlx5_core`.
 
-**Eight ConnectX-9 RoCE rails, and they are not validated.** The leaf ships an
-nv-ipam `IPPool`, a `SriovNetworkNodePolicy` and a `SriovNetwork` per rail, and
-a `nccl-all-reduce-bw-net` check to exercise them. No packet has crossed them:
-on the reference cluster the spare ConnectX-9 ports have no path between nodes,
-because the BlueField DPU bridges only the port carrying the node address.
-Bridging the rest is DPU-side work outside the tenant cluster. Until that
-lands, the `>= 50` floor on that check is a placeholder, not a measurement, and
-the only collective path proven here is MNNVL inside one NVLink domain.
+**Eight ConnectX-9 RoCE rails: deployed and attachable, but carrying no
+traffic.** The leaf ships an nv-ipam `IPPool`, a `SriovNetworkNodePolicy` and a
+`SriovNetwork` per rail, and a `nccl-all-reduce-bw-net` check to exercise them.
+On the reference cluster the operator created one VF per port on both workers
+and advertised all eight as allocatable, nv-ipam assigned an address per rail,
+multus attached `net1`..`net8`, and each VF came up with its own RDMA device
+and a RoCE v2 GID at index 1. No packet has crossed between nodes: the spare
+ConnectX-9 ports have no path between workers, because the BlueField DPU
+bridges only the port carrying the node address, and bridging the rest is
+DPU-side work outside the tenant cluster. So the `>= 50` floor is a
+placeholder, and the only collective path proven here is MNNVL inside one
+NVLink domain.
+
+**These `SriovNetwork`s set no VF attributes, deliberately.** GB200's set
+`linkState: enable`; on this platform the PF driver refuses it, and `trust` and
+`spoofChk` too, failing the attachment with `operation not permitted`. The PF
+is owned by the BlueField DPU, so the host can create VFs but cannot
+administer them. With all three omitted the attachment succeeds.
+
+**`NCCL_IB_GID_INDEX` must be set.** The RoCE v2 GID sits at index 1 on these
+ports; NCCL defaults to 0, which holds the v1 GID.
 
 `numVfs` is 1, which is the ConnectX-9 firmware's `sriov_totalvfs` on these
 trays rather than a tuning choice — eight ports give eight VFs, so one worker

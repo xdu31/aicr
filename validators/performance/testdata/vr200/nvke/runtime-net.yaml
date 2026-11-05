@@ -22,10 +22,15 @@
 # MNNVL are forced off so NCCL uses its built-in verbs transport over the VFs
 # rather than the NVLink fabric the NVLS variant measures.
 #
-# NOT VALIDATED. No packet has crossed these rails. On the reference cluster
-# the spare ConnectX-9 ports have no path between nodes, so this runtime has
-# never completed a run. It is written to match the rails manifest so the two
-# stay in step, not because a number was measured through it.
+# NO RUN HAS COMPLETED. The rails themselves are deployed and attachable --
+# a pod on the reference cluster took all eight VFs, each with an RDMA device
+# and a RoCE v2 GID at index 1, and the precheck below was run against it
+# unchanged and passed. What has not happened is a collective: the spare
+# ConnectX-9 ports have no path between workers, so NCCL has nothing to carry
+# traffic over. The floor in the overlay is a placeholder until that changes.
+#
+# The GID index measured there was 1, not 0, which is exactly why
+# NCCL_IB_GID_INDEX has to be set: index 0 holds the RoCE v1 GID.
 #
 # Differences from the GB200 NET runtime, all forced by the hardware:
 #
