@@ -74,11 +74,29 @@ claimed. Measured on both workers of the reference cluster, identical on each:
 
 That is the fixed baseline the unqualified label above is measured against.
 
-**A NicClusterPolicy is deployed, carrying only `nicConfigurationOperator`.**
+**A NicClusterPolicy is deployed, carrying `nicConfigurationOperator`, `nvIpam` and `secondaryNetwork`.**
 It stands up the `nic-configuration-daemon` that `aicr snapshot
---discover-network` needs. No `ofedDriver` and no rails: NVKE runs the host's
-inbox `mlx5_core`, and this platform's rail layout is unmeasured. The SR-IOV
-operator stays off, since nothing here declares a `SriovNetwork`.
+--discover-network` needs, plus the addressing and multus the RoCE rails
+attach through. Still no `ofedDriver`: NVKE runs the host's inbox `mlx5_core`.
+
+**Eight ConnectX-9 RoCE rails, and they are not validated.** The leaf ships an
+nv-ipam `IPPool`, a `SriovNetworkNodePolicy` and a `SriovNetwork` per rail, and
+a `nccl-all-reduce-bw-net` check to exercise them. No packet has crossed them:
+on the reference cluster the spare ConnectX-9 ports have no path between nodes,
+because the BlueField DPU bridges only the port carrying the node address.
+Bridging the rest is DPU-side work outside the tenant cluster. Until that
+lands, the `>= 50` floor on that check is a placeholder, not a measurement, and
+the only collective path proven here is MNNVL inside one NVLink domain.
+
+`numVfs` is 1, which is the ConnectX-9 firmware's `sriov_totalvfs` on these
+trays rather than a tuning choice — eight ports give eight VFs, so one worker
+pod takes them all.
+
+**If the rails are ever removed, clear the multus CNI config too.** Deleting a
+NicClusterPolicy carrying `secondaryNetwork` removes multus's DaemonSet and
+RBAC but leaves `/etc/cni/net.d/00-multus.conflist` on every node, which sorts
+ahead of OVN-Kubernetes and fails every subsequent pod creation cluster-wide
+with `Unauthorized`. This was observed on this cluster.
 
 **It pins network-operator 26.7.1, not the registry default of 26.7.0.** The
 daemon in 26.7.0 has no firmware-discovery fallback, so a `flint` failure is
